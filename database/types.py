@@ -1,0 +1,2 @@
+JSON = str
+PRIVILEGES = int
