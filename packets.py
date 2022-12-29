@@ -9,7 +9,7 @@ from enums.mods import Mods
 from enums.presence import PresenceFilter
 
 if TYPE_CHECKING:
-    from objects.osu_session import OsuSession
+    from objects.session import Session
 
 
 @enum.unique
@@ -144,19 +144,10 @@ class Action:
 
 @dataclass
 class Message:
-    sender: str
+    sender: str  # TODO: should it always be an empty string?
     text: str
     reciever: str
-    sender_id: int
-
-    #@property
-    #def as_packet(self) -> bytes:
-    #    return send_message(
-    #        senders_name=self.sender,
-    #        message=self.text,
-    #        target_channel_or_user=self.reciever,
-    #        sender_user_id=self.sender_id,
-    #    )
+    sender_id: int  # TODO: should it always be 0?
 
 
 NO_PACKET_DATA = [
@@ -164,7 +155,7 @@ NO_PACKET_DATA = [
     ClientPackets.PING,
 ]  # no packet data is provided when this packet is sent to the server
 USER_IDS = list[int]
-
+CHANNEL_NAME = str
 
 VALID_PACKET_DATA = Union[
     USER_IDS,
@@ -173,6 +164,7 @@ VALID_PACKET_DATA = Union[
     int,
     Message,
     PresenceFilter,
+    CHANNEL_NAME,
 ]
 
 
@@ -201,13 +193,32 @@ class PacketReader:
             ClientPackets.CHANGE_ACTION: self.read_action,
             ClientPackets.USER_STATS_REQUEST: self.read_user_stats_request,
             ClientPackets.SEND_PUBLIC_MESSAGE: self.read_message,
+            ClientPackets.SEND_PRIVATE_MESSAGE: self.read_message,
             ClientPackets.RECEIVE_UPDATES: self.read_presence_filter,
+            ClientPackets.LOGOUT: self.read_logout,
+            ClientPackets.CHANNEL_PART: self.read_channel_name,
+            ClientPackets.CHANNEL_JOIN: self.read_channel_name,
+            ClientPackets.JOIN_LOBBY: self.read_join_lobby,
+            ClientPackets.PART_LOBBY: self.read_part_lobby,
         }
 
         if self.packet_id not in parsing_functions:
             raise Exception(f"Need to read packet data from {self.packet_id.name}")
 
         return parsing_functions[self.packet_id]()
+
+    def read_part_lobby(self) -> None:
+        return None
+
+    def read_join_lobby(self) -> None:
+        return None
+
+    def read_channel_name(self) -> CHANNEL_NAME:
+        return self.read_string()
+
+    def read_logout(self) -> None:
+        self.read_int()
+        return None
 
     def read_presence_filter(self) -> PresenceFilter:
         return PresenceFilter(self.read_int())  # TODO: read unsigned int?
@@ -565,9 +576,17 @@ def channel_info(
     )
 
 
+def channel_kick(
+    channel_name: str,
+) -> bytes:
+    return write_packet(
+        ServerPackets.CHANNEL_KICK,
+        write_string(channel_name)
+    )
+
 def friends_list(friends: Optional[Sequence[int]] = None) -> bytes:
     if friends is None:
-        friends = (0,)
+        friends = []
 
     return write_packet(
         ServerPackets.FRIENDS_LIST,
@@ -612,15 +631,15 @@ def user_silenced(userid: int) -> bytes:
     )
 
 
-def pack_osu_session_stats(osu_session: "OsuSession") -> bytes:
+def pack_osu_session_stats(session: "Session") -> bytes:
     return user_stats(
-        user_id=osu_session.user_id,
-        action=osu_session.status.action,
-        info_text=osu_session.status.info_text,  # TODO
-        map_md5=osu_session.status.map_md5,
-        mods=osu_session.status.mods,
-        mode=osu_session.status.mode.as_osu_client,
-        map_id=osu_session.status.map_id,
+        user_id=session.account.user_id,
+        action=session.osu_client.status.action,
+        info_text=session.osu_client.status.info_text,  # TODO
+        map_md5=session.osu_client.status.map_md5,
+        mods=session.osu_client.status.mods,
+        mode=session.osu_client.status.mode.as_osu_client,
+        map_id=session.osu_client.status.map_id,
         ranked_score=0,  # TODO:
         acc=100.0,  # TODO
         playcount=0,  # TODO:
@@ -630,18 +649,22 @@ def pack_osu_session_stats(osu_session: "OsuSession") -> bytes:
     )
 
 
-def pack_osu_session_presence(osu_session: "OsuSession") -> bytes:
+def pack_osu_session_presence(session: "Session") -> bytes:
     return user_presence(
-        user_id=osu_session.user_id,
-        user_name=osu_session.user_name,
-        utc_offset=osu_session.utc_offset,
-        country=osu_session.osu_country_code,
-        bancho_privleges=osu_session.client_side_privileges,
-        mode=osu_session.status.mode.as_osu_client,
+        user_id=session.account.user_id,
+        user_name=session.account.user_name,
+        utc_offset=session.utc_offset,
+        country=session.osu_client.country_code_to_client_code(
+            session.account.country_code
+        ),
+        bancho_privleges=session.osu_client.server_to_client_privileges(
+            session.privileges
+        ),
+        mode=session.osu_client.status.mode.as_osu_client,
         location=(0.0, 0.0),  # TODO: longitude, latitude
         rank=1,  # TODO
     )
 
 
-def pack_osu_session(osu_session: "OsuSession") -> bytes:
-    return pack_osu_session_presence(osu_session) + pack_osu_session_stats(osu_session)
+def pack_osu_session(session: "Session") -> bytes:
+    return pack_osu_session_presence(session) + pack_osu_session_stats(session)

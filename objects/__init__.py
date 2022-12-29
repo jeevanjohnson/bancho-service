@@ -1,3 +1,4 @@
 from .collections import *
+from .command import *
 from .login import *
-from .osu_session import *
+from .session import *

@@ -1,3 +1,3 @@
-from objects import OsuSessions
+from objects import Sessions
 
-_osu_sessions: OsuSessions = OsuSessions()
+_osu_sessions: Sessions = Sessions()

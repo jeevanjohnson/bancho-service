@@ -1,5 +1,6 @@
 from enums.privileges import ServerPrivileges
-from objects.osu_session import OsuSession
+from objects.session import Session
+from typing import Optional
 
 
 class Channel:
@@ -7,20 +8,23 @@ class Channel:
         self,
         name: str,
         description: str,
-        privs: ServerPrivileges,
+        privileges: Optional[ServerPrivileges] = None,
     ) -> None:
         self.name = name
         self.description = description
-        self.privs = privs
+        self.privileges = privileges
 
-        self.osu_sessions: list[OsuSession] = []
+        self.sessions: list[Session] = []
 
     @property
     def player_count(self):
-        return len(self.osu_sessions)
+        return len(self.sessions)
 
-    def add_session(self, session: OsuSession) -> None:
-        self.osu_sessions.append(session)
+    def add_session(self, session: Session) -> None:
+        self.sessions.append(session)
 
-    def remove_player(self, session: OsuSession) -> None:
-        self.osu_sessions.remove(session)
+    def remove_session(self, session: Session) -> None:
+        self.sessions.remove(session)
+
+    def __contains__(self, session: Session) -> bool:
+        return session in self.sessions
