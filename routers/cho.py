@@ -511,7 +511,10 @@ async def channel_join(session: Session, channel_name: str) -> None:
     channel = common.channels.get_from_name(channel_name)
 
     if channel is None:
-        session.osu_client.notify(f"{channel_name} doesn't exist")
+        if channel_name.startswith("#match_"):
+            session.osu_client.leave_channel_from_name(channel_name)
+        else:
+            session.osu_client.notify(f"{channel_name} doesn't exist")
         return None
 
     # TODO: checks for the channel
@@ -558,16 +561,14 @@ async def part_lobby(session: Session) -> None:
 @packet_handler(ClientPackets.CREATE_MATCH)
 async def create_match(session: Session, match_packet: packets.Match) -> None:
     match_id = len(common.matches) + 1
-    
+
     match = Match.from_match_packet(match_packet, match_id)
 
     try:
         common.matches.add(match)
     except:
-        session.osu_client.pending_packets += (
-            packets.notification("No slots available for this match.")
-            + packets.match_join_fail()
-        )
+        session.osu_client.notify("No slots available for this match.")
+        session.osu_client.joining_match_failed()
         return None
 
     # create channel for multiplayer match
@@ -576,3 +577,22 @@ async def create_match(session: Session, match_packet: packets.Match) -> None:
 
     # have the session join the match
     session.join_match(match, match.pass_word)
+
+
+@packet_handler(ClientPackets.PART_MATCH)
+async def part_match(session: Session) -> None:
+    session.leave_match()
+
+
+@packet_handler(ClientPackets.MATCH_CHANGE_SETTINGS)
+async def change_settings(
+    session: Session,
+    match_packet: packets.Match,
+) -> None:
+    new_match = Match.from_match_packet(match_packet)
+
+    if session.match is None:
+        return None
+
+    breakpoint()
+    # TODO: run checks and test with another account

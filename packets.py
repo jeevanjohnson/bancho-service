@@ -187,6 +187,7 @@ class Match:
 NO_PACKET_DATA = [
     ClientPackets.REQUEST_STATUS_UPDATE,
     ClientPackets.PING,
+    ClientPackets.PART_MATCH
 ]  # no packet data is provided when this packet is sent to the server
 USER_IDS = list[int]
 CHANNEL_NAME = str
@@ -242,8 +243,9 @@ class PacketReader:
             ClientPackets.CHANNEL_JOIN: self.read_channel_name,
             ClientPackets.JOIN_LOBBY: self.read_join_lobby,
             ClientPackets.PART_LOBBY: self.read_part_lobby,
-            ClientPackets.CREATE_MATCH: self.read_create_match,
+            ClientPackets.CREATE_MATCH: self.read_match,
             ClientPackets.START_SPECTATING: self.read_start_spectating,
+            ClientPackets.MATCH_CHANGE_SETTINGS: self.read_match,
         }
 
         if self.packet_id not in parsing_functions:
@@ -254,7 +256,7 @@ class PacketReader:
     def read_start_spectating(self) -> int:
         return self.read_int()
 
-    def read_create_match(self) -> Match:
+    def read_match(self) -> Match:
         match = Match(
             id=self.read_short(),
             in_progress=self.read_byte() == 1,

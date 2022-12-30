@@ -68,6 +68,7 @@ class OsuClient:
         return None
 
     def join_match(self, match: "Match") -> None:
+        self.join_channel(match.channel)
         self.pending_packets += packets.match_join_sucess(
             match=match, send_pass_word=True
         )
@@ -93,11 +94,15 @@ class OsuClient:
 
         return None
 
-    def leave_channel(self, channel: "Channel") -> None:
+    def leave_channel_from_name(self, channel_name: str) -> None:
         self.pending_packets += packets.channel_kick(
-            channel_name=channel.name,
+            channel_name=channel_name,
         )
 
+        return None
+
+    def leave_channel(self, channel: "Channel") -> None:
+        self.leave_channel_from_name(channel.name)
         return None
 
     def server_to_client_privileges(
@@ -141,6 +146,13 @@ class Session:
     privileges: ServerPrivileges
     last_pinged: float
     channels_in: list["Channel"] = field(default_factory=list)
+    match: Optional["Match"] = None
+
+    def leave_match(self) -> None:
+        if self.match is None:
+            return None
+
+        self.match.remove_session(self)
 
     def join_match(
         self,

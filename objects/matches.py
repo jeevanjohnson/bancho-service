@@ -9,6 +9,7 @@ from objects.channels import Channel
 
 if TYPE_CHECKING:
     import packets
+    from objects.session import Session
 
 
 @dataclass
@@ -67,7 +68,7 @@ class Match:
 
     def init_channel(self) -> Channel:
         channel = Channel(
-            name=f"match_{self.id}",
+            name=f"#match_{self.id}",
             description=f"Multiplayer Match ({self.id})",
             auto_join=False,
         )
@@ -76,8 +77,22 @@ class Match:
 
         return channel
 
+    def remove_session(self, session: "Session") -> None:
+        for slot in self.slots:
+            if slot.user_id == session.account.user_id:
+                self.slots.remove(slot)
+
+        session.leave_channel(self.channel)
+
+        breakpoint()
+
     @classmethod
-    def from_match_packet(cls, match: "packets.Match", match_id: int) -> "Match":
+    def from_match_packet(
+        cls, match: "packets.Match", match_id: Optional[int] = None
+    ) -> "Match":
+        if match_id is None:
+            match_id = match.id
+
         mods, game_mode = utils.ensure_mods_and_gamemode(
             mods=match.mods,
             game_mode=match.game_mode,

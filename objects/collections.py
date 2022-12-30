@@ -110,6 +110,10 @@ class Matches(list[Optional[Match]]):
     def __init__(self, *args, **kwargs):
         super().__init__([None] * 64)
 
+    def __len__(self) -> int:
+        active_matches = [match for match in self if match is not None]
+        return len(active_matches)
+
     def get_free_spot(self) -> Optional[int]:
         for index, spot in enumerate(self):
             if spot is None:
