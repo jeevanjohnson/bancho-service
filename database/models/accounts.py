@@ -1,6 +1,6 @@
+import json
 from typing import Optional
 
-import json
 from sqlmodel import Field, SQLModel
 
 from database.types import JSON, PRIVILEGES

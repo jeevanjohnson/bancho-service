@@ -1,3 +1,4 @@
 from . import database, locks
 from .channels import _channels as channels
-from .osu_sessions import _osu_sessions as osu_sessions
+from .matches import _matches as matches
+from .sessions import _sessions as sessions

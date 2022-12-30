@@ -1,14 +1,17 @@
 import enum
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Sequence, Union
 
+import objects.matches
 from enums.actions import ActionType
 from enums.game_mode import GameMode
 from enums.mods import Mods
+from enums.multiplayer import SlotStatus
 from enums.presence import PresenceFilter
 
 if TYPE_CHECKING:
+    import objects.matches
     from objects.session import Session
 
 
@@ -150,6 +153,36 @@ class Message:
     sender_id: int  # TODO: should it always be 0?
 
 
+@dataclass
+class Match:
+    id: int = 0
+    in_progress: bool = False
+
+    powerplay: int = 0  # TODO: what is this
+    mods: int = 0
+    name: str = ""
+    pass_word: str = ""
+
+    map_name: str = ""
+    map_id: int = 0
+    map_md5: str = ""
+
+    slot_statuses: list[int] = field(default_factory=list)  # i8
+    slot_teams: list[int] = field(default_factory=list)  # i8
+    slot_ids: list[int] = field(default_factory=list)  # i8
+
+    host_id: int = 0
+
+    game_mode: int = 0
+    win_condition: int = 0
+    team_type: int = 0
+
+    freemods: bool = False
+    slot_mods: list[int] = field(default_factory=list)
+
+    seed: int = 0  # TODO: what is this
+
+
 NO_PACKET_DATA = [
     ClientPackets.REQUEST_STATUS_UPDATE,
     ClientPackets.PING,
@@ -165,25 +198,48 @@ VALID_PACKET_DATA = Union[
     Message,
     PresenceFilter,
     CHANNEL_NAME,
+    Match,
 ]
+
+
+def ensure_mods_and_gamemode(mods: int, game_mode: int) -> tuple[Mods, GameMode]:
+    if mods & Mods.RELAX:
+        if game_mode == GameMode.vn_mania:
+            mods &= ~Mods.RELAX
+        else:
+            game_mode += 4
+    elif mods & Mods.AUTOPILOT:
+        if game_mode in (GameMode.vn_taiko, GameMode.vn_catch, GameMode.vn_mania):
+            mods &= ~Mods.AUTOPILOT
+        else:
+            game_mode += 8
+
+    return Mods(mods), GameMode(game_mode)
 
 
 class PacketReader:
     def __init__(self, raw_data: bytes) -> None:
         self.raw_data: bytes = raw_data
         self.offset: int = 0
-        self.packet_id: ClientPackets = ClientPackets(
-            self.read_custom(
-                fmt="Hx",
-                buffer=self.buffer_data[:3],
-                offset=3,
-            )[0],
-        )
-        self.length: int = self.read_int()
+        self.packet_id: ClientPackets = self.read_packet_id()
+        self.length: int = self.read_packet_length()
 
     @property
     def buffer_data(self):
         return self.raw_data[self.offset :]
+
+    def read_packet_length(self) -> int:
+        length = self.read_unsigned_int()  # self.read_int()
+        return length
+
+    def read_packet_id(self) -> ClientPackets:
+        packet_id = self.read_custom(
+            fmt="Hx",
+            buffer=self.buffer_data[:3],
+            offset=3,
+        )[0]
+
+        return ClientPackets(packet_id)
 
     def packet_data(self) -> VALID_PACKET_DATA:
         if self.packet_id in NO_PACKET_DATA:
@@ -200,12 +256,49 @@ class PacketReader:
             ClientPackets.CHANNEL_JOIN: self.read_channel_name,
             ClientPackets.JOIN_LOBBY: self.read_join_lobby,
             ClientPackets.PART_LOBBY: self.read_part_lobby,
+            ClientPackets.CREATE_MATCH: self.read_create_match,
+            ClientPackets.START_SPECTATING: self.read_start_spectating,
         }
 
         if self.packet_id not in parsing_functions:
             raise Exception(f"Need to read packet data from {self.packet_id.name}")
 
         return parsing_functions[self.packet_id]()
+
+    def read_start_spectating(self) -> int:
+        return self.read_int()
+
+    def read_create_match(self) -> Match:
+        match = Match(
+            id=self.read_short(),
+            in_progress=self.read_byte() == 1,
+            powerplay=self.read_byte(),
+            mods=self.read_int(),
+            name=self.read_string(),
+            pass_word=self.read_string(),
+            map_name=self.read_string(),
+            map_id=self.read_int(),
+            map_md5=self.read_string(),
+            slot_statuses=[self.read_byte() for _ in range(16)],
+            slot_teams=[self.read_byte() for _ in range(16)],
+        )
+
+        for status in match.slot_statuses:
+            if status & SlotStatus.HAS_PLAYER:
+                match.slot_ids.append(self.read_int())
+
+        match.host_id = self.read_int()
+        match.game_mode = self.read_byte()
+        match.win_condition = self.read_byte()
+        match.team_type = self.read_byte()
+        match.freemods = self.read_byte() == 1
+
+        if match.freemods:
+            match.slot_mods = [self.read_int() for _ in range(16)]
+
+        match.seed = self.read_int()  # used for mania random mod
+
+        return match
 
     def read_part_lobby(self) -> None:
         return None
@@ -245,24 +338,10 @@ class PacketReader:
 
         map_md5 = self.read_string()
 
-        mods = Mods(
-            self.read_unsigned_int(),
+        mods, game_mode = ensure_mods_and_gamemode(
+            mods=self.read_unsigned_int(),
+            game_mode=self.read_unsigned_byte(),
         )
-
-        mode = self.read_unsigned_byte()
-
-        if mods & Mods.RELAX:
-            if mode == GameMode.vn_mania:
-                mods &= ~Mods.RELAX
-            else:
-                mode += 4
-        elif mods & Mods.AUTOPILOT:
-            if mode in (GameMode.vn_taiko, GameMode.vn_catch, GameMode.vn_mania):
-                mods &= ~Mods.AUTOPILOT
-            else:
-                mode += 8
-
-        mode = GameMode(mode)
 
         map_id = self.read_int()
 
@@ -271,7 +350,7 @@ class PacketReader:
             info_text=info_text,
             map_md5=map_md5,
             mods=mods,
-            mode=mode,
+            mode=game_mode,
             map_id=map_id,
         )
 
@@ -288,7 +367,7 @@ class PacketReader:
     def read_byte(self) -> int:
         (val,) = struct.unpack("<b", self.buffer_data[:1])
         self.offset += 1
-        return val
+        return val  # val - 256 if val > 127 else val
 
     def read_short(self) -> int:
         (val,) = struct.unpack("<h", self.buffer_data[:2])
@@ -369,6 +448,7 @@ def read_packets(client_packets: bytes) -> list[Packet]:
     reader = PacketReader(client_packets)
 
     while reader.buffer_data:
+
         packets.append(
             Packet(
                 id=reader.packet_id,
@@ -436,6 +516,10 @@ def write_unsigned_byte(b: int) -> bytes:
 
 def write_short(s: int) -> bytes:
     return struct.pack("<h", s)
+
+
+def write_unsigned_short(s: int) -> bytes:
+    return struct.pack("<H", s)
 
 
 def write_long_long(l: int) -> bytes:
@@ -581,8 +665,9 @@ def channel_kick(
 ) -> bytes:
     return write_packet(
         ServerPackets.CHANNEL_KICK,
-        write_string(channel_name)
+        write_string(channel_name),
     )
+
 
 def friends_list(friends: Optional[Sequence[int]] = None) -> bytes:
     if friends is None:
@@ -668,3 +753,54 @@ def pack_osu_session_presence(session: "Session") -> bytes:
 
 def pack_osu_session(session: "Session") -> bytes:
     return pack_osu_session_presence(session) + pack_osu_session_stats(session)
+
+
+def match_join_fail() -> bytes:
+    return write_packet(ServerPackets.MATCH_JOIN_FAIL)
+
+
+def match_join_sucess(
+    match: "objects.matches.Match",
+    send_pass_word: bool = True,
+) -> bytes:
+    pass_word = b""
+
+    # what is this and what is going on
+    if match.pass_word:
+        if send_pass_word:
+            pass_word = write_string(match.pass_word)
+        else:
+            pass_word = b"\x0b\x00"
+    else:
+        pass_word = b"\x00"
+    
+    free_mod = write_byte(match.free_mod)
+    if match.free_mod:
+        for slot in match.slots:
+            free_mod += write_unsigned_int(slot.mods)
+
+    return write_packet(
+        ServerPackets.MATCH_JOIN_SUCCESS,
+        write_unsigned_short(match.id),
+        write_byte(match.in_progress),
+        write_byte(0),
+        write_unsigned_int(match.mods),
+        write_string(match.name),
+        pass_word,
+        write_string(match.name),
+        write_short(match.current_map.id),
+        write_string(match.current_map.md5),
+        *[write_byte(slot.status) for slot in match.slots],
+        *[write_byte(slot.team) for slot in match.slots],
+        *[
+            write_unsigned_int(slot.user_id)
+            for slot in match.slots
+            if slot.status & SlotStatus.HAS_PLAYER and slot.user_id
+        ],
+        write_unsigned_int(match.host_id),
+        write_byte(match.game_mode),
+        write_byte(match.win_condition),
+        write_byte(match.team_type),
+        free_mod,
+        write_byte(match.seed)
+    )

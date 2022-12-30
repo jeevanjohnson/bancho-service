@@ -18,7 +18,7 @@ import packets
 from database import models as database_models
 from enums.presence import PresenceFilter
 from enums.privileges import ServerPrivileges
-from objects import ClientDetails, LoginData, Session, OsuClient
+from objects import ClientDetails, LoginData, Match, OsuClient, Session
 from packets import ClientPackets
 
 bancho_router = APIRouter(
@@ -204,12 +204,12 @@ async def login_developer_mode(
         login_packets += packets.channel_join(channel.name)
 
     user_data = packets.pack_osu_session(session)
-    common.osu_sessions.send_to_all(user_data)
+    common.sessions.send_to_all(user_data)
 
     login_packets += user_data
-    login_packets += common.osu_sessions.collect_all_sessions_for(session)
+    login_packets += common.sessions.collect_all_sessions_for(session)
 
-    common.osu_sessions.append(session)
+    common.sessions.append(session)
 
     return LoginResult(
         packets=bytes(login_packets),
@@ -243,7 +243,7 @@ async def login(request_body: bytes, database_session: DatabaseSession) -> Login
             "cho_token": "no",
         }
 
-    if common.osu_sessions.get_from_user_id(account.id):
+    if common.sessions.get_from_user_id(account.id):
         return {
             "packets": (
                 packets.user_id(-1) + packets.notification("User is already logged in")
@@ -268,9 +268,9 @@ async def bancho_http_handler():
     return HTMLResponse(
         "<br>".join(
             [
-                "Welcome to the bancho of all time",
+                "B a n c h o S e r v i c e",
                 "",
-                f"online users: {len(common.osu_sessions)}",
+                f"online users: {len(common.sessions)}",
             ]
         )
     )
@@ -296,17 +296,17 @@ async def bancho_handler(
             },
         )
 
-    session = common.osu_sessions.get_from_token(osu_token)
+    session = common.sessions.get_from_token(osu_token)
 
     if session is None:
         return Response(
             packets.system_restart() + packets.notification("restarting server")
         )
 
-    packet_queue = bytearray()
+    pending_packets = bytearray()
 
-    if session.osu_client.packet_queue:
-        packet_queue += session.osu_client.clear_packet_queue()
+    if session.osu_client.pending_packets:
+        pending_packets += session.osu_client.clear_pending_packets()
 
     client_packets = await request.body()
 
@@ -323,10 +323,10 @@ async def bancho_handler(
             if packet_response is None:
                 continue
 
-            packet_queue += packet_response
+            pending_packets += packet_response
 
     return Response(
-        bytes(packet_queue),
+        bytes(pending_packets),
     )
 
 
@@ -355,7 +355,7 @@ async def change_action(
     session.osu_client.status.mode = action.mode
     session.osu_client.status.map_id = action.map_id
 
-    common.osu_sessions.send_to_all(
+    common.sessions.send_to_all(
         packets.pack_osu_session(session),
     )
 
@@ -369,7 +369,7 @@ async def user_stats_request(
 ) -> None:
     all_users_stats = bytearray()
 
-    sessions = common.osu_sessions.get_from_user_ids(user_ids)
+    sessions = common.sessions.get_from_user_ids(user_ids)
 
     if sessions is None:
         return None
@@ -377,7 +377,7 @@ async def user_stats_request(
     for session in sessions:
         all_users_stats += packets.pack_osu_session_stats(session)
 
-    session.osu_client.packet_queue += all_users_stats
+    session.osu_client.pending_packets += all_users_stats
 
     return None
 
@@ -398,10 +398,10 @@ async def send_public_message(
 
     # TODO: make this betters
     # if message.text.startswith(config.BotSettings.command_prefix):
-    #    bot = common.osu_sessions.get_bot()
+    #    bot = common.sessions.get_bot()
     #    bot_message = await bot.process_command(message.text, session)
     #    if bot_message is not None:
-    #        common.osu_sessions.send_to_all(
+    #        common.sessions.send_to_all(
     #            packets.send_message(
     #                senders_name=bot.user_name,
     #                message=bot_message,
@@ -418,7 +418,7 @@ async def send_public_message(
     )
 
     # TODO: check if users blocked you
-    common.osu_sessions.send_to_all_but(
+    common.sessions.send_to_all_but(
         excluded=[session],
         data=message_packet,
     )
@@ -427,19 +427,17 @@ async def send_public_message(
 
 @packet_handler(ClientPackets.SEND_PRIVATE_MESSAGE)
 async def send_private_message(session: Session, message: packets.Message) -> None:
-    target_session = common.osu_sessions.get_from_user_name(message.reciever)
+    target_session = common.sessions.get_from_user_name(message.reciever)
 
     if target_session is None:
-        session.osu_client.packet_queue += packets.notification(
-            f"{message.reciever} isn't online"
-        )
+        session.osu_client.notify(f"{message.reciever} isn't online")
         return None
 
     if target_session.is_bot:
         # TODO: process commands
         return None
     else:
-        target_session.osu_client.packet_queue += packets.send_message(
+        target_session.osu_client.pending_packets += packets.send_message(
             senders_name=session.account.user_name,
             message=message.text,
             target_channel_or_user=message.reciever,
@@ -462,7 +460,7 @@ async def request_status_update(
     session: Session,
 ) -> None:
 
-    session.osu_client.packet_queue += packets.pack_osu_session_stats(session)
+    session.osu_client.pending_packets += packets.pack_osu_session_stats(session)
 
     return None
 
@@ -474,7 +472,7 @@ async def logout(
     if (time.time() - session.last_pinged) < 2:
         return None
 
-    common.osu_sessions.remove(session)
+    common.sessions.remove(session)
 
     for channel in common.channels:
         if session not in channel:
@@ -482,9 +480,9 @@ async def logout(
 
         session.leave_channel(channel)
 
-    for other_session in common.osu_sessions:
+    for other_session in common.sessions:
         if other_session.account.user_id in other_session.account.friends:
-            session.osu_client.packet_queue += packets.logout(
+            session.osu_client.pending_packets += packets.logout(
                 other_session.account.user_id
             )
 
@@ -513,9 +511,7 @@ async def channel_join(session: Session, channel_name: str) -> None:
     channel = common.channels.get_from_name(channel_name)
 
     if channel is None:
-        session.osu_client.packet_queue += packets.notification(
-            f"{channel_name} doesn't exist"
-        )
+        session.osu_client.notify(f"{channel_name} doesn't exist")
         return None
 
     # TODO: checks for the channel
@@ -532,12 +528,15 @@ async def channel_join(session: Session, channel_name: str) -> None:
 async def join_lobby(session: Session) -> None:
     lobby_channel = common.channels.get_from_name("#lobby")
 
-    assert lobby_channel, "#lobby was not found"
+    if lobby_channel is not None:
+        if session not in lobby_channel:
+            session.join_channel(lobby_channel)
 
-    if session in lobby_channel:
-        return None
-    else:
-        session.join_channel(lobby_channel)
+    for match in common.matches:
+        if match is None:
+            continue
+
+        session.osu_client.see_match(match)
 
     return None
 
@@ -554,3 +553,26 @@ async def part_lobby(session: Session) -> None:
         session.leave_channel(lobby_channel)
 
     return None
+
+
+@packet_handler(ClientPackets.CREATE_MATCH)
+async def create_match(session: Session, match_packet: packets.Match) -> None:
+    match_id = len(common.matches) + 1
+    
+    match = Match.from_match_packet(match_packet, match_id)
+
+    try:
+        common.matches.add(match)
+    except:
+        session.osu_client.pending_packets += (
+            packets.notification("No slots available for this match.")
+            + packets.match_join_fail()
+        )
+        return None
+
+    # create channel for multiplayer match
+    channel = match.init_channel()
+    common.channels.add(channel)
+
+    # have the session join the match
+    session.join_match(match, match.pass_word)

@@ -1,6 +1,7 @@
+from typing import Optional
+
 from enums.privileges import ServerPrivileges
 from objects.session import Session
-from typing import Optional
 
 
 class Channel:
@@ -8,10 +9,12 @@ class Channel:
         self,
         name: str,
         description: str,
-        privileges: Optional[ServerPrivileges] = None,
+        auto_join: bool,
+        privileges: ServerPrivileges = ServerPrivileges.Normal,
     ) -> None:
         self.name = name
         self.description = description
+        self.auto_join = auto_join
         self.privileges = privileges
 
         self.sessions: list[Session] = []

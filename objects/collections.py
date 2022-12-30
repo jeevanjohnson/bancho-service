@@ -1,8 +1,8 @@
-from typing import Any, Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
 
 import packets
 from objects.channels import Channel
-from typing import TYPE_CHECKING
+from objects.matches import Match
 
 if TYPE_CHECKING:
     from objects.session import Session
@@ -67,7 +67,7 @@ class Sessions(list["Session"]):
         else:
             return session
 
-    #def get_bot(self) -> "Bot":
+    # def get_bot(self) -> "Bot":
     #    # TODO: fix this typing
     #    return [session for session in self if session.is_bot][0]  # type: ignore
 
@@ -76,7 +76,7 @@ class Sessions(list["Session"]):
             if session.is_bot:
                 continue
 
-            session.osu_client.packet_queue += data
+            session.osu_client.pending_packets += data
 
     def send_to_all_but(
         self,
@@ -90,7 +90,7 @@ class Sessions(list["Session"]):
             if session in excluded:
                 continue
 
-            session.osu_client.packet_queue += data
+            session.osu_client.pending_packets += data
 
     def collect_all_sessions_for(self, session: "Session") -> bytes:
         data = bytearray()
@@ -105,12 +105,20 @@ class Sessions(list["Session"]):
 
         return bytes(data)
 
-    # def send_to_all_if(
-    #    self,
-    #    condition: Callable[["Session"], bool],
-    #    data: bytes,
-    # ) -> None:
-    #    ...
 
-    # def collect_all_data(self) -> bytes:
-    #    ...
+class Matches(list[Optional[Match]]):
+    def __init__(self, *args, **kwargs):
+        super().__init__([None] * 64)
+
+    def get_free_spot(self) -> Optional[int]:
+        for index, spot in enumerate(self):
+            if spot is None:
+                return index
+
+    def add(self, match: Match) -> None:
+        spot = self.get_free_spot()
+
+        if spot is None:
+            raise Exception("no free spots")
+
+        self[spot] = match
