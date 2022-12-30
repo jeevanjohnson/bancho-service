@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Sequence, Union
 
 import objects.matches
+import utils
 from enums.actions import ActionType
 from enums.game_mode import GameMode
 from enums.mods import Mods
@@ -202,21 +203,6 @@ VALID_PACKET_DATA = Union[
 ]
 
 
-def ensure_mods_and_gamemode(mods: int, game_mode: int) -> tuple[Mods, GameMode]:
-    if mods & Mods.RELAX:
-        if game_mode == GameMode.vn_mania:
-            mods &= ~Mods.RELAX
-        else:
-            game_mode += 4
-    elif mods & Mods.AUTOPILOT:
-        if game_mode in (GameMode.vn_taiko, GameMode.vn_catch, GameMode.vn_mania):
-            mods &= ~Mods.AUTOPILOT
-        else:
-            game_mode += 8
-
-    return Mods(mods), GameMode(game_mode)
-
-
 class PacketReader:
     def __init__(self, raw_data: bytes) -> None:
         self.raw_data: bytes = raw_data
@@ -338,7 +324,7 @@ class PacketReader:
 
         map_md5 = self.read_string()
 
-        mods, game_mode = ensure_mods_and_gamemode(
+        mods, game_mode = utils.ensure_mods_and_gamemode(
             mods=self.read_unsigned_int(),
             game_mode=self.read_unsigned_byte(),
         )
@@ -773,7 +759,7 @@ def match_join_sucess(
             pass_word = b"\x0b\x00"
     else:
         pass_word = b"\x00"
-    
+
     free_mod = write_byte(match.free_mod)
     if match.free_mod:
         for slot in match.slots:
@@ -788,7 +774,7 @@ def match_join_sucess(
         write_string(match.name),
         pass_word,
         write_string(match.name),
-        write_short(match.current_map.id),
+        write_int(match.current_map.id),
         write_string(match.current_map.md5),
         *[write_byte(slot.status) for slot in match.slots],
         *[write_byte(slot.team) for slot in match.slots],
@@ -802,5 +788,5 @@ def match_join_sucess(
         write_byte(match.win_condition),
         write_byte(match.team_type),
         free_mod,
-        write_byte(match.seed)
+        write_byte(match.seed),
     )

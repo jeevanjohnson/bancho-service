@@ -1,11 +1,14 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-import packets
+import utils
 from enums.game_mode import GameMode
 from enums.mods import Mods
 from enums.multiplayer import SlotStatus, Team, TeamTypes, WinConditions
 from objects.channels import Channel
+
+if TYPE_CHECKING:
+    import packets
 
 
 @dataclass
@@ -74,8 +77,8 @@ class Match:
         return channel
 
     @classmethod
-    def from_match_packet(cls, match: packets.Match, match_id: int) -> "Match":
-        mods, game_mode = packets.ensure_mods_and_gamemode(
+    def from_match_packet(cls, match: "packets.Match", match_id: int) -> "Match":
+        mods, game_mode = utils.ensure_mods_and_gamemode(
             mods=match.mods,
             game_mode=match.game_mode,
         )

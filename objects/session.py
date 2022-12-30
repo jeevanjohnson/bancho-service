@@ -17,8 +17,6 @@ if TYPE_CHECKING:
     from objects.channels import Channel
     from objects.matches import Match
 
-from utils import error
-
 # import common
 
 USER_ID = int
