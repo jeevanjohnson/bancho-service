@@ -333,3 +333,21 @@ def update_status(
     session["current_mods"] = current_mods
 
     return session
+
+
+def update_users_stats(
+    session_token: str,
+    user_ids: list[int],
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    session_repo = SessionRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    for other_sessions in session_repo.fetch_many(user_ids=user_ids):
+        session["packet_queue"] += packets.pack_osu_session(other_sessions)
+
+    return session

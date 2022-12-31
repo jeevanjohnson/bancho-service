@@ -29,7 +29,7 @@ def init_app(app: FastAPI) -> FastAPI:
     async def start_up() -> None:
         common.redis = FakeStrictRedis(version=6)  # TODO: user actual redis
         
-        common.database = create_engine(url="sqlite:///database.db", echo=True)
+        common.database = create_engine(url="sqlite:///database.db", echo=False)
 
         sqlmodel.SQLModel.metadata.create_all(
             common.database.engine,

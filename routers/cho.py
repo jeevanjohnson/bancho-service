@@ -182,3 +182,21 @@ async def change_action(
         return None
 
     return updated_session
+
+
+@packet_handler(ClientPackets.USER_STATS_REQUEST)
+async def user_stats_request(
+    token: str,
+    data_sessions: DataSessions,
+    user_ids: list[int],
+) -> Optional[Session]:
+    updated_session = usecases.sessions.update_users_stats(
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+        user_ids=user_ids,
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session

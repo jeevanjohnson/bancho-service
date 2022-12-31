@@ -71,6 +71,67 @@ class SessionRepo:
     def __init__(self, redis_connection: FakeStrictRedis) -> None:
         self.redis_connection = redis_connection
 
+    def fetch_many(
+        self,
+        user_ids: Optional[list[int]] = None,  # TODO: more parameters
+    ) -> list[Session]:
+        token_keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
+        tokens = [key.decode().split(":")[-1] for key in token_keys]
+
+        valid_tokens: list[str] = []
+        valid_session_models: list[SessionModel] = []
+
+        for token, raw_session in zip(
+            tokens,
+            self.redis_connection.mget(token_keys),
+        ):
+            if raw_session is None:
+                continue
+
+            session: SessionModel = json.loads(raw_session)
+
+            if user_ids:
+                if session["account"]["id"] not in user_ids:
+                    continue
+
+            valid_tokens.append(token)
+            valid_session_models.append(session)
+
+        token: str
+        session: SessionModel
+
+        sessions = []
+
+        for token, session in zip(valid_tokens, valid_session_models):
+            account = Account(
+                id=session["account"]["id"],
+                user_name=session["account"]["user_name"],
+                email_address=session["account"]["email_address"],
+                password_argon2=session["account"]["password_argon2"],
+                friends=json.loads(session["account"]["friends"]),
+                country_code=session["account"]["country_code"],
+                privileges=session["account"]["privileges"],
+            )
+            sessions.append(
+                Session(
+                    token=token,
+                    account=account,
+                    utc_offset=session["utc_offset"],
+                    last_pinged=session["last_pinged"],
+                    match=session["match"],
+                    channels_in=json.loads(session["channels_in"]),
+                    status=ActionType(session["status"]),
+                    status_text=session["status_text"],
+                    current_map_md5=session["current_map_md5"],
+                    current_mods=Mods(session["current_mods"]),
+                    current_game_mode=GameMode(session["current_game_mode"]),
+                    current_map_id=session["current_map_id"],
+                    packet_queue=bytearray(json.loads(session["packet_queue"])),
+                )
+            )
+
+        return sessions
+
     def update(
         self,
         token: str,
@@ -108,14 +169,23 @@ class SessionRepo:
         return updated_session
 
     def fetch_all(self) -> list[Session]:
-        session_models = self.redis_connection.hgetall("bancho:sessions")
+        tokens_key: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
+        tokens: list[str] = [key.decode().split(":")[-1] for key in tokens_key]
+
+        session_models: list[SessionModel] = []
+
+        for raw_session in self.redis_connection.mget(tokens_key):
+            if raw_session is None:
+                continue
+
+            session_models.append(json.loads(raw_session))
 
         token: str
         session: SessionModel
 
         sessions = []
 
-        for token, session in session_models.items():
+        for token, session in zip(tokens, session_models):
             account = Account(
                 id=session["account"]["id"],
                 user_name=session["account"]["user_name"],
@@ -158,24 +228,23 @@ class SessionRepo:
 
             session: SessionModel = json.loads(raw_session)
         else:
+            # TODO: find a better way because scaling from here is not that fun
             tokens = self.redis_connection.keys("bancho:sessions:*")
-            
+
             if not tokens:
                 return None
-            
+
             session_models: list[SessionModel] = []
-            
+
             for raw_session in self.redis_connection.mget(tokens):
                 if raw_session is None:
                     continue
-                
-                session_models.append(
-                    json.loads(raw_session)
-                )
-            
+
+                session_models.append(json.loads(raw_session))
+
             if not session_models:
                 return None
-            
+
             session_token: str
             session: SessionModel
 
