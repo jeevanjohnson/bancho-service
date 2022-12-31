@@ -1,7 +1,8 @@
-from typing import TypedDict
 import json
+from typing import Optional, TypedDict
+
 from fakeredis._server import FakeStrictRedis
-from typing import Optional
+
 from enums.privileges import ServerPrivileges
 
 SERVER_PRIVILEGES = int

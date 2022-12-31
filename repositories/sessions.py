@@ -1,13 +1,14 @@
-from typing import TypedDict
 import json
+from typing import Optional, TypedDict
+
 from fakeredis._server import FakeStrictRedis
-from typing import Optional
-from repositories.accounts import Account
-from repositories.channels import ChannelModel
+
 from database.models import AcountModelAsDict
 from enums.actions import ActionType
-from enums.mods import Mods
 from enums.game_mode import GameMode
+from enums.mods import Mods
+from repositories.accounts import Account
+from repositories.channels import ChannelModel
 
 CHANNEL_NAME = str
 MATCH_ID = int

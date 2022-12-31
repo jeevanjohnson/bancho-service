@@ -1,13 +1,11 @@
 import json
-from typing import Optional
+from typing import Optional, TypedDict
 
-import sqlalchemy
 from sqlmodel import Session as DatabaseSession
 from sqlmodel import select
 
 from database.models import AccountModel
 from enums.privileges import ServerPrivileges
-from typing import TypedDict
 
 
 class Account(TypedDict):

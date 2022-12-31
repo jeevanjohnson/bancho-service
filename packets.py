@@ -1,8 +1,10 @@
 import enum
 import struct
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Sequence, Union, TypedDict
+from typing import TYPE_CHECKING, Any, Optional, Sequence, TypedDict, Union
 
+import config
+import functions.time
 import objects.matches
 import utils
 from enums.actions import ActionType
@@ -12,8 +14,6 @@ from enums.multiplayer import SlotStatus
 from enums.presence import PresenceFilter
 from enums.privileges import ClientPrivileges
 from repositories.channels import Channel
-import functions.time
-import config
 
 if TYPE_CHECKING:
     import objects.matches

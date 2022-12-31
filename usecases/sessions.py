@@ -1,3 +1,4 @@
+import time
 from typing import Optional, TypedDict
 
 from fakeredis._server import FakeStrictRedis
@@ -10,11 +11,10 @@ import functions.security
 import functions.session
 import functions.time
 import packets
-from repositories.accounts import AccountRepo
-from repositories.sessions import SessionRepo
-from repositories.channels import ChannelRepo, Channel
 from enums.privileges import ServerPrivileges
-import time
+from repositories.accounts import AccountRepo
+from repositories.channels import Channel, ChannelRepo
+from repositories.sessions import SessionRepo
 
 
 class LoginResult(TypedDict):
@@ -27,7 +27,7 @@ USER_ID = int
 
 
 class BrodcastToSessionsResult(TypedDict):
-    succes: bool
+    success: bool
 
 
 def brodcast_to_sessions(
@@ -48,11 +48,11 @@ def brodcast_to_sessions(
 
         session_repo.update(session["token"], session)
 
-    return BrodcastToSessionsResult(succes=True)
+    return BrodcastToSessionsResult(success=True)
 
 
 class BrodcastEveryoneToResult(TypedDict):
-    succes: bool
+    success: bool
 
 
 def brodcast_everyone_to(
@@ -75,7 +75,7 @@ def brodcast_everyone_to(
 
     session_repo.update(session_token, session_wanting_data)
 
-    return BrodcastEveryoneToResult(succes=True)
+    return BrodcastEveryoneToResult(success=True)
 
 
 async def normal_login(

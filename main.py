@@ -5,10 +5,10 @@ import uvicorn
 from fakeredis._server import FakeStrictRedis
 from fastapi import FastAPI
 from sqlmodel import create_engine
-from repositories.channels import ChannelRepo
-from enums.privileges import ServerPrivileges
 
 import common
+from enums.privileges import ServerPrivileges
+from repositories.channels import ChannelRepo
 
 # from objects import Bot
 

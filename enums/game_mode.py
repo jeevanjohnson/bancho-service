@@ -12,7 +12,7 @@ class GameMode(enum.IntEnum):
     rx_taiko = 5
     rx_catch = 6
 
-    ap_std = 7
+    ap_std = 8
 
     @property
     def as_osu_client(self) -> "GameMode":
