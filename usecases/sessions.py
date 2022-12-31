@@ -30,9 +30,11 @@ class BrodcastToSessionsResult(TypedDict):
 
 def brodcast_to_sessions(
     data: bytes,
-    session_repo: SessionRepo,
+    redis_connection: FakeStrictRedis,
     exclude: Optional[list[USER_ID]] = None,
 ) -> BrodcastToSessionsResult:
+    session_repo = SessionRepo(redis_connection)
+
     if exclude is None:
         exclude = []
 
@@ -55,9 +57,11 @@ class BrodcastEveryoneToResult(TypedDict):
 
 def brodcast_everyone_to(
     session_token: str,
-    session_repo: SessionRepo,
+    redis_connection: FakeStrictRedis,
     exclude: Optional[list[USER_ID]] = None,
 ) -> BrodcastEveryoneToResult:
+    session_repo = SessionRepo(redis_connection)
+
     if exclude is None:
         exclude = []
 
@@ -86,9 +90,8 @@ async def normal_login(
     user_name: str,
     password_md5: str,
     utc_offset: int,
-    account_repo: AccountRepo,
-    session_repo: SessionRepo,
-    channel_repo: ChannelRepo,
+    database_session: DatabaseSession,
+    redis_session: FakeStrictRedis,
 ) -> LoginResult:
     ...
 
@@ -135,10 +138,13 @@ async def developer_login(
     user_name: str,
     password_md5: str,
     utc_offset: int,
-    account_repo: AccountRepo,
-    session_repo: SessionRepo,
-    channel_repo: ChannelRepo,
+    database_session: DatabaseSession,
+    redis_session: FakeStrictRedis,
 ) -> LoginResult:
+    account_repo = AccountRepo(database_session)
+    session_repo = SessionRepo(redis_session)
+    channel_repo = ChannelRepo(redis_session)
+
     account = account_repo.fetch_one(user_name=user_name)
     session = session_repo.fetch_one(user_name=user_name)
 
@@ -189,7 +195,7 @@ async def developer_login(
     # TODO: handle blocked users
     result = brodcast_to_sessions(
         data=login_packets["user_data"],
-        session_repo=session_repo,
+        redis_connection=redis_session,
         exclude=[session["account"]["id"]],
     )
 
@@ -198,7 +204,7 @@ async def developer_login(
     # TODO: handle blocked users
     result = brodcast_everyone_to(
         session_token=session["token"],
-        session_repo=session_repo,
+        redis_connection=redis_session,
         exclude=[session["account"]["id"]],
     )
 
@@ -220,28 +226,21 @@ async def login(
     database_session: DatabaseSession,
     redis_session: FakeStrictRedis,
 ) -> LoginResult:
-    # validation actual
-    account_repo = AccountRepo(database_session)
-    session_repo = SessionRepo(redis_session)
-    channel_repo = ChannelRepo(redis_session)
-
     if config.DeveloperSettings.create_account_on_login:
         return await developer_login(
             user_name=user_name,
             password_md5=password_md5,
             utc_offset=utc_offset,
-            account_repo=account_repo,
-            session_repo=session_repo,
-            channel_repo=channel_repo,
+            database_session=database_session,
+            redis_session=redis_session,
         )
     else:
         return await normal_login(  # TODO: finish this
             user_name=user_name,
             password_md5=password_md5,
             utc_offset=utc_offset,
-            account_repo=account_repo,
-            session_repo=session_repo,
-            channel_repo=channel_repo,
+            database_session=database_session,
+            redis_session=redis_session,
         )
 
 
@@ -349,5 +348,61 @@ def update_users_stats(
 
     for other_sessions in session_repo.fetch_many(user_ids=user_ids):
         session["packet_queue"] += packets.pack_osu_session(other_sessions)
+
+    return session
+
+
+def send_message(
+    session_token: str,
+    redis_session: FakeStrictRedis,
+    message_content: str,
+    target: str,
+) -> Optional[Session]:
+    # handles channel messages and private messages
+    session_repo = SessionRepo(redis_session)
+    channel_repo = ChannelRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    if target.startswith("#"):
+        # send message to everyone in channel
+        channel = channel_repo.fetch_one(name=target)
+        assert channel, "TODO: handle this properly"
+
+        session_tokens_in = channel["sessions_in"]
+
+        # remove sender's session token so message won't be sent twice
+        session_tokens_in.remove(session_token)
+
+        for other_session in session_repo.fetch_many(tokens=session_tokens_in):
+            other_session["packet_queue"] += packets.send_message(
+                senders_name=session["account"]["user_name"],
+                message=message_content,
+                target_channel_or_user=target,
+                sender_user_id=session["account"]["id"],
+            )
+
+            session_repo.update(
+                token=other_session["token"],
+                updated_session=other_session,
+            )
+    else:
+        target_session = session_repo.fetch_one(user_name=target)
+        assert target_session, "TODO: handle this properly"
+        # send private message to target
+        target_session["packet_queue"] += packets.send_message(
+            senders_name=session["account"]["user_name"],
+            message=message_content,
+            target_channel_or_user=target,
+            sender_user_id=session["account"]["id"],
+        )
+
+        session_repo.update(
+            token=target_session["token"],
+            updated_session=target_session,
+        )
 
     return session

@@ -74,6 +74,7 @@ class SessionRepo:
     def fetch_many(
         self,
         user_ids: Optional[list[int]] = None,  # TODO: more parameters
+        tokens: Optional[list[str]] = None,
     ) -> list[Session]:
         keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
         tokens = [key.decode().split(":")[-1] for key in keys]
@@ -90,7 +91,10 @@ class SessionRepo:
 
             session: SessionModel = json.loads(raw_session)
 
-            if user_ids:
+            if token:
+                if token not in tokens:
+                    continue
+            elif user_ids:
                 if session["account"]["id"] not in user_ids:
                     continue
 
@@ -229,14 +233,15 @@ class SessionRepo:
             session: SessionModel = json.loads(raw_session)
         else:
             # TODO: find a better way because scaling from here is not that fun
-            tokens = self.redis_connection.keys("bancho:sessions:*")
+            keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
+            tokens: list[str] = [key.decode().split(":")[-1] for key in keys]
 
             if not tokens:
                 return None
 
             session_models: list[SessionModel] = []
 
-            for raw_session in self.redis_connection.mget(tokens):
+            for raw_session in self.redis_connection.mget(keys):
                 if raw_session is None:
                     continue
 

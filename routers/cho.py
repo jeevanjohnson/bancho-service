@@ -200,3 +200,40 @@ async def user_stats_request(
         return None
 
     return updated_session
+
+
+@packet_handler(ClientPackets.SEND_PUBLIC_MESSAGE)
+async def send_public_message(
+    token: str,
+    data_sessions: DataSessions,
+    message: packets.Message,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.send_message( 
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+        message_content=message.text,
+        target=message.reciever,
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+@packet_handler(ClientPackets.SEND_PRIVATE_MESSAGE)
+async def send_private_message(
+    token: str,
+    data_sessions: DataSessions,
+    message: packets.Message,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.send_message( 
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+        message_content=message.text,
+        target=message.reciever,
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
