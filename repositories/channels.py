@@ -57,12 +57,34 @@ class ChannelRepo:
 
     def fetch_many(
         self,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
-        auto_join: Optional[bool] = None,
-        privileges: Optional[ServerPrivileges] = None,
-    ) -> Optional[list[Channel]]:
-        ...
+        names: Optional[list[str]] = None,
+    ) -> list[Channel]:
+        channels = []
+
+        key: bytes
+        for key in self.redis_connection.scan_iter("bancho:channels:*"):
+            channel_name = key.decode().split(":")[-1]
+
+            if names and channel_name not in names:
+                continue
+
+            raw_channel = self.redis_connection.get(key)
+            if raw_channel is None:
+                continue
+
+            channel: ChannelModel = json.loads(raw_channel)
+
+            channels.append(
+                Channel(
+                    name=channel["name"],
+                    description=channel["description"],
+                    auto_join=channel["auto_join"],
+                    sessions_in=json.loads(channel["sessions_in"]),
+                    privileges=ServerPrivileges(channel["privileges"]),
+                )
+            )
+
+        return channels
 
     def fetch_one(
         self,

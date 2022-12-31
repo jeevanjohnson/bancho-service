@@ -10,6 +10,7 @@ import common
 import functions.cho
 import packets
 import usecases.sessions
+from enums.presence import PresenceFilter
 from packets import ClientPackets
 from repositories.sessions import Session
 
@@ -308,4 +309,51 @@ async def part_channel(
     return updated_session
 
 
-# TODO: ClientPackets.RECEIVE_UPDATES
+@packet_handler(ClientPackets.RECEIVE_UPDATES)
+async def receive_updates(
+    token: str,
+    data_sessions: DataSessions,
+    presence_filter: PresenceFilter,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.update_presence_filter(
+        session_token=token,
+        presence_filter=presence_filter,
+        redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+
+@packet_handler(ClientPackets.REQUEST_STATUS_UPDATE)
+async def request_status_update(
+    token: str,
+    data_sessions: DataSessions,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.update_session_stats(
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+
+@packet_handler(ClientPackets.LOGOUT)
+async def logout(
+    token: str,
+    data_sessions: DataSessions,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.logout(
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session

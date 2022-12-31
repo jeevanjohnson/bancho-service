@@ -15,6 +15,7 @@ import packets
 from enums.actions import ActionType
 from enums.game_mode import GameMode
 from enums.mods import Mods
+from enums.presence import PresenceFilter
 from enums.privileges import ServerPrivileges
 from packets import Packet
 from repositories.accounts import AccountRepo
@@ -285,10 +286,10 @@ async def handle_packets(
             print(f"Need to handle: {repr(packet)}")
             continue
 
-        if packet.data:
-            args = [token, all_data_sessions, packet.data]
-        else:
+        if packet.data is None:
             args = [token, all_data_sessions]
+        else:
+            args = [token, all_data_sessions, packet.data]
 
         updated_session: Optional[Session] = await common.packet_handlers[packet.id](
             *args
@@ -386,6 +387,54 @@ def part_lobby(
     return session
 
 
+def update_session_stats(
+    session_token: str,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    session_repo = SessionRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    session["packet_queue"] += packets.pack_osu_session_stats(session)
+
+    return session
+
+
+def logout(
+    session_token: str,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    channel_repo = ChannelRepo(redis_session)
+    session_repo = SessionRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    if (time.time() - session["last_pinged"]) < 2:
+        return session
+
+    for channel in channel_repo.fetch_many(names=session["channels_in"]):
+        channel["sessions_in"].remove(session_token)
+        session["channels_in"].remove(channel["name"])
+
+    for other_session in session_repo.fetch_all():
+        if other_session["token"] == session_token:
+            continue
+
+        other_session["packet_queue"] += packets.logout(
+            session["account"]["id"],
+        )
+
+    session_deleted = session_repo.delete(session_token)
+
+    return session_deleted
+
+
 def join_channel(
     session_token: str,
     channel_name: str,
@@ -454,6 +503,23 @@ def part_channel(
         name=channel["name"],
         updated_channel=channel,
     )
+
+    return session
+
+
+def update_presence_filter(
+    session_token: str,
+    presence_filter: PresenceFilter,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    session_repo = SessionRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    session["presence_filter"] = presence_filter
 
     return session
 

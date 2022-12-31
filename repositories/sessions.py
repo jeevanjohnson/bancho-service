@@ -7,6 +7,7 @@ from database.models import AcountModelAsDict
 from enums.actions import ActionType
 from enums.game_mode import GameMode
 from enums.mods import Mods
+from enums.presence import PresenceFilter
 from repositories.accounts import Account
 from repositories.channels import ChannelModel
 
@@ -37,6 +38,7 @@ class Session(TypedDict):
     current_map_id: int
 
     in_lobby: bool
+    presence_filter: PresenceFilter
 
     packet_queue: bytearray
 
@@ -44,7 +46,7 @@ class Session(TypedDict):
 class SessionModel(TypedDict):
     # "xModel" is what goes into the database
     # TODO: should token be here?
-    
+
     account: AcountModelAsDict
 
     utc_offset: int
@@ -62,6 +64,7 @@ class SessionModel(TypedDict):
     current_map_id: int
 
     in_lobby: bool
+    presence_filter: int
 
     packet_queue: JSON
 
@@ -84,21 +87,21 @@ class SessionRepo:
     ) -> list[Session]:
         key: bytes
         valid_sessions: dict[str, SessionModel] = {}
-        
+
         for key in self.redis_connection.scan_iter("bancho:sessions:*"):
             token = key.decode().split(":")[-1]
-            
+
             raw_session = self.redis_connection.get(key)
             if raw_session is None:
                 continue
-            
+
             session: SessionModel = json.loads(raw_session)
-            
+
             if tokens and token not in tokens:
                 continue
             elif user_ids and session["account"]["id"] not in user_ids:
                 continue
-            
+
             valid_sessions[token] = session
 
         sessions = []
@@ -129,6 +132,7 @@ class SessionRepo:
                     current_map_id=session["current_map_id"],
                     packet_queue=bytearray(json.loads(session["packet_queue"])),
                     in_lobby=session["in_lobby"],
+                    presence_filter=PresenceFilter(session["presence_filter"]),
                 )
             )
 
@@ -162,6 +166,7 @@ class SessionRepo:
             current_map_id=updated_session["current_map_id"],
             packet_queue=json.dumps(list(updated_session["packet_queue"])),
             in_lobby=updated_session["in_lobby"],
+            presence_filter=int(updated_session["presence_filter"]),
         )
 
         self.redis_connection.set(
@@ -174,18 +179,18 @@ class SessionRepo:
     def fetch_all(self) -> list[Session]:
         key: bytes
         valid_sessions: dict[str, SessionModel] = {}
-        
+
         for key in self.redis_connection.scan_iter("bancho:sessions:*"):
             token = key.decode().split(":")[-1]
-            
+
             raw_session = self.redis_connection.get(key)
             if raw_session is None:
                 continue
-            
+
             session: SessionModel = json.loads(raw_session)
-            
+
             valid_sessions[token] = session
-        
+
         sessions = []
 
         for token, session in valid_sessions.items():
@@ -214,6 +219,7 @@ class SessionRepo:
                     current_map_id=session["current_map_id"],
                     packet_queue=bytearray(json.loads(session["packet_queue"])),
                     in_lobby=session["in_lobby"],
+                    presence_filter=PresenceFilter(session["presence_filter"]),
                 )
             )
 
@@ -226,7 +232,7 @@ class SessionRepo:
     ) -> Optional[Session]:
         key: bytes
         session: SessionModel
-        
+
         if token:
             raw_session = self.redis_connection.get(f"bancho:sessions:{token}")
             if raw_session is None:
@@ -236,13 +242,13 @@ class SessionRepo:
         else:
             for key in self.redis_connection.scan_iter("bancho:sessions:*"):
                 token_from_key = key.decode().split(":")[-1]
-                
+
                 raw_session = self.redis_connection.get(key)
                 if raw_session is None:
                     continue
-                
+
                 session: SessionModel = json.loads(raw_session)
-                
+
                 if session["account"]["user_name"] == user_name:
                     token = token_from_key
                     break
@@ -274,6 +280,7 @@ class SessionRepo:
             current_map_id=session["current_map_id"],
             packet_queue=bytearray(json.loads(session["packet_queue"])),
             in_lobby=session["in_lobby"],
+            presence_filter=PresenceFilter(session["presence_filter"]),
         )
 
     def create(
@@ -301,7 +308,8 @@ class SessionRepo:
             current_game_mode=GameMode.vn_std,
             current_map_id=0,
             utc_offset=utc_offset,
-            in_lobby=False
+            in_lobby=False,
+            presence_filter=PresenceFilter.All,
         )
 
         account_model_as_dict = AcountModelAsDict(
@@ -327,16 +335,16 @@ class SessionRepo:
             current_game_mode=int(session["current_game_mode"]),
             current_map_id=session["current_map_id"],
             utc_offset=session["utc_offset"],
-            in_lobby=session["in_lobby"]
+            in_lobby=session["in_lobby"],
+            presence_filter=int(session["presence_filter"]),
         )
         self.redis_connection.set(
             session_key,
             json.dumps(session_model),
         )
 
-        channel_key_fmt = "bancho:channels:{}"
         for channel_name in session["channels_in"]:
-            channel_key = channel_key_fmt.format(channel_name)
+            channel_key = f"bancho:channels:{channel_name}"
             raw_channel = self.redis_connection.get(channel_key)
 
             assert raw_channel, "this should not happen"
@@ -355,3 +363,12 @@ class SessionRepo:
             )
 
         return session
+
+    def delete(
+        self,
+        session_token: Optional[TOKEN] = None,
+    ) -> None:
+        if session_token:
+            self.redis_connection.delete(f"bancho:sessions:{session_token}")
+
+        return None
