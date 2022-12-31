@@ -1,10 +1,13 @@
 """Bancho Service: Web server that handles c*.ppy.sh requests."""
+import redis
 import sqlmodel
 import uvicorn
+from fakeredis._server import FakeStrictRedis
 from fastapi import FastAPI
 from sqlmodel import create_engine
+from repositories.channels import ChannelRepo
+from enums.privileges import ServerPrivileges
 
-import commands
 import common
 
 # from objects import Bot
@@ -15,22 +18,31 @@ app = FastAPI(
 
 
 def init_app(app: FastAPI) -> FastAPI:
-    from routers.api import api_router
+    # from routers.api import api_router
     from routers.cho import bancho_router
 
-    app.include_router(api_router, prefix="/api/v1")
+    # app.include_router(api_router, prefix="/api/v1")
     app.include_router(bancho_router)
 
     @app.on_event("startup")
     async def start_up() -> None:
-        # bot = Bot()
-        # bot.commands = commands.all_commands
-        # common.sessions.append(bot)
+        common.redis = FakeStrictRedis(version=6) # TODO: user actual redis
 
         common.database.engine = create_engine(url="sqlite:///database.db", echo=True)
 
         sqlmodel.SQLModel.metadata.create_all(
             common.database.engine,
+        )
+
+        # init channels
+        # TODO: more channels?
+        account_repo = ChannelRepo(common.redis)
+
+        account_repo.create(
+            name="#osu",
+            description="main osu! channel",
+            auto_join=True,
+            privileges=ServerPrivileges.Normal,
         )
 
     return app

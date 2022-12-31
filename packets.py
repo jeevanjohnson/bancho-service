@@ -1,7 +1,7 @@
 import enum
 import struct
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Optional, Sequence, Union, TypedDict
 
 import objects.matches
 import utils
@@ -10,10 +10,14 @@ from enums.game_mode import GameMode
 from enums.mods import Mods
 from enums.multiplayer import SlotStatus
 from enums.presence import PresenceFilter
+from enums.privileges import ClientPrivileges
+from repositories.channels import Channel
+import functions.time
+import config
 
 if TYPE_CHECKING:
     import objects.matches
-    from objects.session import Session
+    from repositories.sessions import Session
 
 
 @enum.unique
@@ -187,7 +191,7 @@ class Match:
 NO_PACKET_DATA = [
     ClientPackets.REQUEST_STATUS_UPDATE,
     ClientPackets.PING,
-    ClientPackets.PART_MATCH
+    ClientPackets.PART_MATCH,
 ]  # no packet data is provided when this packet is sent to the server
 USER_IDS = list[int]
 CHANNEL_NAME = str
@@ -555,10 +559,10 @@ def protocol_version(version: int = 19):
     )
 
 
-def bancho_privileges(bancho_privleges: int) -> bytes:
+def bancho_privileges(brancho_privileges: Union[ClientPrivileges, int]) -> bytes:
     return write_packet(
         ServerPackets.PRIVILEGES,
-        write_int(bancho_privleges),
+        write_int(brancho_privileges),
     )
 
 
@@ -567,7 +571,7 @@ def user_presence(
     user_name: str,
     utc_offset: int,
     country: int,
-    bancho_privleges: int,
+    brancho_privileges: int,
     mode: int,
     location: tuple[float, float],
     rank: int,
@@ -578,7 +582,7 @@ def user_presence(
         write_string(user_name),
         write_unsigned_byte(utc_offset + 24),
         write_unsigned_byte(country),
-        write_unsigned_byte(bancho_privleges | mode << 5),
+        write_unsigned_byte(brancho_privileges | mode << 5),
         write_float(location[0]),
         write_float(location[1]),
         write_int(rank),
@@ -704,15 +708,18 @@ def user_silenced(userid: int) -> bytes:
     )
 
 
+# live server functionality
+
+
 def pack_osu_session_stats(session: "Session") -> bytes:
     return user_stats(
-        user_id=session.account.user_id,
-        action=session.osu_client.status.action,
-        info_text=session.osu_client.status.info_text,  # TODO
-        map_md5=session.osu_client.status.map_md5,
-        mods=session.osu_client.status.mods,
-        mode=session.osu_client.status.mode.as_osu_client,
-        map_id=session.osu_client.status.map_id,
+        user_id=session["account"]["id"],
+        action=session["status"],
+        info_text=session["status_text"],  # TODO
+        map_md5=session["current_map_md5"],
+        mods=session["current_mods"],
+        mode=session["current_game_mode"],
+        map_id=session["current_map_id"],
         ranked_score=0,  # TODO:
         acc=100.0,  # TODO
         playcount=0,  # TODO:
@@ -724,23 +731,65 @@ def pack_osu_session_stats(session: "Session") -> bytes:
 
 def pack_osu_session_presence(session: "Session") -> bytes:
     return user_presence(
-        user_id=session.account.user_id,
-        user_name=session.account.user_name,
-        utc_offset=session.utc_offset,
-        country=session.osu_client.country_code_to_client_code(
-            session.account.country_code
+        user_id=session["account"]["id"],
+        user_name=session["account"]["user_name"],
+        utc_offset=session["utc_offset"],
+        country=functions.time.country_code_to_client_code(
+            session["account"]["country_code"]
         ),
-        bancho_privleges=session.osu_client.server_to_client_privileges(
-            session.privileges
+        brancho_privileges=ClientPrivileges.from_server_privileges(
+            session["account"]["privileges"],
         ),
-        mode=session.osu_client.status.mode.as_osu_client,
+        mode=session["current_game_mode"],
         location=(0.0, 0.0),  # TODO: longitude, latitude
-        rank=1,  # TODO
+        rank=1,  # TODO session["preformace"]["pp"]
     )
 
 
 def pack_osu_session(session: "Session") -> bytes:
     return pack_osu_session_presence(session) + pack_osu_session_stats(session)
+
+
+class LoginSessionResult(TypedDict):
+    login_packets: bytes
+    user_data: bytes
+
+
+# TODO: channel class thing
+def login_session(session: "Session", channels: list[Channel]) -> LoginSessionResult:
+    login_packets = bytearray(user_id(session["account"]["id"]))
+    login_packets += notification(config.InGameSettings.login_message)
+    login_packets += protocol_version()
+    login_packets += bancho_privileges(
+        ClientPrivileges.from_server_privileges(session["account"]["privileges"])
+    )
+    login_packets += friends_list(session["account"]["friends"])
+    login_packets += menu_icon(
+        menu_image=config.InGameSettings.menu_icon,
+        redirect_url=config.InGameSettings.redirect_url,
+    )
+
+    for channel in channels:
+        login_packets += channel_info(
+            channel_name=channel["name"],
+            channel_description=channel["description"],
+            channel_player_count=len(channel["sessions_in"]),
+        )
+
+    if channels:
+        login_packets += channel_info_end()
+
+    for channel in channels:
+        login_packets += channel_join(channel["name"])
+
+    user_data = pack_osu_session(session)
+
+    login_packets += user_data
+
+    return LoginSessionResult(
+        login_packets=bytes(login_packets),
+        user_data=user_data,
+    )
 
 
 def match_join_fail() -> bytes:
