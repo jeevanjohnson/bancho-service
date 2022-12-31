@@ -75,15 +75,15 @@ class SessionRepo:
         self,
         user_ids: Optional[list[int]] = None,  # TODO: more parameters
     ) -> list[Session]:
-        token_keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
-        tokens = [key.decode().split(":")[-1] for key in token_keys]
+        keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
+        tokens = [key.decode().split(":")[-1] for key in keys]
 
         valid_tokens: list[str] = []
         valid_session_models: list[SessionModel] = []
 
         for token, raw_session in zip(
             tokens,
-            self.redis_connection.mget(token_keys),
+            self.redis_connection.mget(keys),
         ):
             if raw_session is None:
                 continue
@@ -169,12 +169,12 @@ class SessionRepo:
         return updated_session
 
     def fetch_all(self) -> list[Session]:
-        tokens_key: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
-        tokens: list[str] = [key.decode().split(":")[-1] for key in tokens_key]
+        keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
+        tokens: list[str] = [key.decode().split(":")[-1] for key in keys]
 
         session_models: list[SessionModel] = []
 
-        for raw_session in self.redis_connection.mget(tokens_key):
+        for raw_session in self.redis_connection.mget(keys):
             if raw_session is None:
                 continue
 
