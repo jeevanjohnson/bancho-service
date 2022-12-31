@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from sqlmodel import create_engine
 
 import common
+from database.models import *
 from enums.privileges import ServerPrivileges
 from repositories.channels import ChannelRepo
 
@@ -26,9 +27,9 @@ def init_app(app: FastAPI) -> FastAPI:
 
     @app.on_event("startup")
     async def start_up() -> None:
-        common.redis = FakeStrictRedis(version=6) # TODO: user actual redis
-
-        common.database.engine = create_engine(url="sqlite:///database.db", echo=True)
+        common.redis = FakeStrictRedis(version=6)  # TODO: user actual redis
+        
+        common.database = create_engine(url="sqlite:///database.db", echo=True)
 
         sqlmodel.SQLModel.metadata.create_all(
             common.database.engine,

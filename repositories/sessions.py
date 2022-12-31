@@ -74,30 +74,30 @@ class SessionRepo:
     def update(
         self,
         token: str,
-        new_session: Session,
+        updated_session: Session,
     ) -> Session:
         account = AcountModelAsDict(
-            id=new_session["account"]["id"],
-            user_name=new_session["account"]["user_name"],
-            email_address=new_session["account"]["email_address"],
-            password_argon2=new_session["account"]["password_argon2"],
-            friends=json.dumps(new_session["account"]["friends"]),
-            country_code=new_session["account"]["country_code"],
-            privileges=new_session["account"]["privileges"],
+            id=updated_session["account"]["id"],
+            user_name=updated_session["account"]["user_name"],
+            email_address=updated_session["account"]["email_address"],
+            password_argon2=updated_session["account"]["password_argon2"],
+            friends=json.dumps(updated_session["account"]["friends"]),
+            country_code=updated_session["account"]["country_code"],
+            privileges=updated_session["account"]["privileges"],
         )
         session_model = SessionModel(
             account=account,
-            utc_offset=new_session["utc_offset"],
-            last_pinged=new_session["last_pinged"],
-            match=new_session["match"],
-            channels_in=json.dumps(new_session["channels_in"]),
-            status=new_session["status"],
-            status_text=new_session["status_text"],
-            current_map_md5=new_session["current_map_md5"],
-            current_mods=new_session["current_mods"],
-            current_game_mode=new_session["current_game_mode"],
-            current_map_id=new_session["current_map_id"],
-            packet_queue=json.dumps(list(new_session["packet_queue"])),
+            utc_offset=updated_session["utc_offset"],
+            last_pinged=updated_session["last_pinged"],
+            match=updated_session["match"],
+            channels_in=json.dumps(updated_session["channels_in"]),
+            status=updated_session["status"],
+            status_text=updated_session["status_text"],
+            current_map_md5=updated_session["current_map_md5"],
+            current_mods=updated_session["current_mods"],
+            current_game_mode=updated_session["current_game_mode"],
+            current_map_id=updated_session["current_map_id"],
+            packet_queue=json.dumps(list(updated_session["packet_queue"])),
         )
 
         self.redis_connection.set(
@@ -105,7 +105,7 @@ class SessionRepo:
             json.dumps(session_model),
         )
 
-        return new_session
+        return updated_session
 
     def fetch_all(self) -> list[Session]:
         session_models = self.redis_connection.hgetall("bancho:sessions")
@@ -148,15 +148,43 @@ class SessionRepo:
     def fetch_one(
         self,
         token: Optional[str] = None,  # TODO: support other fetch methods
+        user_name: Optional[str] = None,
     ) -> Optional[Session]:
-        if token is None:
-            return None  # TODO: for now
+        # TODO: make this cleaner
+        if token:
+            raw_session = self.redis_connection.get(f"bancho:sessions:{token}")
+            if raw_session is None:
+                return None
 
-        raw_session = self.redis_connection.get(f"bancho:sessions:{token}")
-        if raw_session is None:
-            return None
+            session: SessionModel = json.loads(raw_session)
+        else:
+            tokens = self.redis_connection.keys("bancho:sessions:*")
+            
+            if not tokens:
+                return None
+            
+            session_models: list[SessionModel] = []
+            
+            for raw_session in self.redis_connection.mget(tokens):
+                if raw_session is None:
+                    continue
+                
+                session_models.append(
+                    json.loads(raw_session)
+                )
+            
+            if not session_models:
+                return None
+            
+            session_token: str
+            session: SessionModel
 
-        session: SessionModel = json.loads(raw_session)
+            for session_token, session in zip(tokens, session_models):
+                if session["account"]["user_name"] == user_name:
+                    token = session_token
+                    break
+            else:
+                return None
 
         account = Account(
             id=session["account"]["id"],

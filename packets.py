@@ -146,7 +146,7 @@ class Action:
     info_text: str
     map_md5: str
     mods: Mods
-    mode: GameMode
+    game_mode: GameMode
     map_id: int
 
 
@@ -342,7 +342,7 @@ class PacketReader:
             info_text=info_text,
             map_md5=map_md5,
             mods=mods,
-            mode=game_mode,
+            game_mode=game_mode,
             map_id=map_id,
         )
 

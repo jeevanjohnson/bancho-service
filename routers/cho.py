@@ -1,4 +1,4 @@
-from typing import AsyncIterable, Literal, Optional, TypedDict
+from typing import Any, AsyncIterable, Callable, Literal, Optional, TypedDict
 
 from fakeredis._server import FakeStrictRedis
 from fastapi import APIRouter, Depends, Header, Request, Response, status
@@ -10,14 +10,17 @@ import common
 import functions.cho
 import packets
 import usecases.sessions
+from packets import ClientPackets
+from repositories.sessions import Session
 
 bancho_router = APIRouter(tags=["Bancho", "Router"])
 
 # EACH function should have only one job it should be doing
+packet_handlers = {}
 
 
 async def get_database_session() -> AsyncIterable[DatabaseSession]:
-    with DatabaseSession(common.database.engine) as session:
+    with DatabaseSession(common.database) as session:
         yield session
 
 
@@ -45,7 +48,7 @@ async def handle_login(
         redis_session=redis_session,
     )
 
-    if login_result["error_message"] is not None:
+    if login_result["error_message"]:
         error_packets = packets.user_id(-1) + packets.notification(
             message=login_result["error_message"]
         )
@@ -63,14 +66,29 @@ async def handle_login(
 
 
 class SessionResult(TypedDict):
-    packets: bytes
+    response_packets: bytes
 
 
 async def handle_session(
-    osu_token: str,
+    token: str,
+    raw_packets: bytes,
     database_session: DatabaseSession,
+    redis_session: FakeStrictRedis,
 ) -> SessionResult:
-    ...
+    parsed_packets = packets.read_packets(raw_packets)
+
+    result = await usecases.sessions.handle_packets(
+        token=token,
+        parsed_packets=parsed_packets,
+        database_session=database_session,
+        redis_session=redis_session,
+    )
+
+    # TODO: errors?
+
+    return SessionResult(
+        response_packets=result["response_packets"],
+    )
 
 
 @bancho_router.post("/")
@@ -93,10 +111,13 @@ async def bancho_handler(
         )
     else:
         data = await handle_session(
-            osu_token=osu_token,
+            token=osu_token,
+            raw_packets=await request.body(),
             database_session=database_session,
+            redis_session=redis_session,
         )
 
+    # TODO: not sure about this anymore
     if validated_data := trycast(LoginResult, data):
         return Response(
             content=validated_data["packets"],
@@ -106,7 +127,7 @@ async def bancho_handler(
         )
     elif validated_data := trycast(SessionResult, data):
         return Response(
-            content=validated_data["packets"],
+            content=validated_data["response_packets"],
         )
     else:
         return JSONResponse(
@@ -115,3 +136,49 @@ async def bancho_handler(
                 "error": data,
             },
         )
+
+
+def packet_handler(packet_id: ClientPackets) -> Callable:
+    def inner(func: Callable) -> Callable:
+        common.packet_handlers[packet_id] = func
+        return func
+
+    return inner
+
+
+# packet_handlers can return either an updated session or nothing
+# each packet handler takes the identifier of the session (token)
+# and the avaliable data sessions
+
+from usecases.sessions import DataSessions
+
+
+@packet_handler(ClientPackets.PING)
+async def ping(
+    token: str,
+    data_sessions: DataSessions,
+) -> Optional[Session]:
+    return None
+
+
+@packet_handler(ClientPackets.CHANGE_ACTION)
+async def change_action(
+    token: str,
+    data_sessions: DataSessions,
+    action: packets.Action,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.update_status(
+        session_token=token,
+        status=action.action_type,
+        status_text=action.info_text,
+        current_map_id=action.map_id,
+        current_map_md5=action.map_md5,
+        current_game_mode=action.game_mode,
+        current_mods=action.mods,
+        redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
