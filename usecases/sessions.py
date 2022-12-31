@@ -352,6 +352,112 @@ def update_users_stats(
     return session
 
 
+def join_lobby(
+    session_token: str,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    session_repo = SessionRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    session["in_lobby"] = True
+
+    # TODO: see matches
+
+    return session
+
+
+def part_lobby(
+    session_token: str,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    session_repo = SessionRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    session["in_lobby"] = False
+
+    return session
+
+
+def join_channel(
+    session_token: str,
+    channel_name: str,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    session_repo = SessionRepo(redis_session)
+    channel_repo = ChannelRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    channel = channel_repo.fetch_one(name=channel_name)
+
+    if channel is None:
+        return None
+
+    channel["sessions_in"].append(session_token)
+    session["channels_in"].append(channel_name)
+
+    channel_packets = packets.channel_info(
+        channel_name=channel["name"],
+        channel_description=channel["description"],
+        channel_player_count=len(channel["sessions_in"]),
+    )
+    channel_packets += packets.channel_info_end()
+    channel_packets += packets.channel_join(channel["name"])
+
+    session["packet_queue"] += channel_packets
+
+    channel_repo.update(
+        name=channel["name"],
+        updated_channel=channel,
+    )
+
+    return session
+
+
+def part_channel(
+    session_token: str,
+    channel_name: str,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    session_repo = SessionRepo(redis_session)
+    channel_repo = ChannelRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    channel = channel_repo.fetch_one(name=channel_name)
+
+    if channel is None:
+        return None
+
+    channel["sessions_in"].remove(session_token)
+    session["channels_in"].remove(channel_name)
+
+    session["packet_queue"] += packets.channel_kick(
+        channel_name=channel_name,
+    )
+
+    channel_repo.update(
+        name=channel["name"],
+        updated_channel=channel,
+    )
+
+    return session
+
+
 def send_message(
     session_token: str,
     redis_session: FakeStrictRedis,

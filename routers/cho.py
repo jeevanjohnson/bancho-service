@@ -208,7 +208,7 @@ async def send_public_message(
     data_sessions: DataSessions,
     message: packets.Message,
 ) -> Optional[Session]:
-    updated_session = usecases.sessions.send_message( 
+    updated_session = usecases.sessions.send_message(
         session_token=token,
         redis_session=data_sessions["redis_session"],
         message_content=message.text,
@@ -219,6 +219,7 @@ async def send_public_message(
         return None
 
     return updated_session
+
 
 @packet_handler(ClientPackets.SEND_PRIVATE_MESSAGE)
 async def send_private_message(
@@ -226,7 +227,7 @@ async def send_private_message(
     data_sessions: DataSessions,
     message: packets.Message,
 ) -> Optional[Session]:
-    updated_session = usecases.sessions.send_message( 
+    updated_session = usecases.sessions.send_message(
         session_token=token,
         redis_session=data_sessions["redis_session"],
         message_content=message.text,
@@ -237,3 +238,74 @@ async def send_private_message(
         return None
 
     return updated_session
+
+
+@packet_handler(ClientPackets.JOIN_LOBBY)
+async def join_lobby(
+    token: str,
+    data_sessions: DataSessions,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.join_lobby(
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+
+@packet_handler(ClientPackets.PART_LOBBY)
+async def part_lobby(
+    token: str,
+    data_sessions: DataSessions,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.part_lobby(
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+
+@packet_handler(ClientPackets.CHANNEL_JOIN)
+async def channel_join(
+    token: str,
+    data_sessions: DataSessions,
+    channel_name: str,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.join_channel(
+        session_token=token,
+        channel_name=channel_name,
+        redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+
+@packet_handler(ClientPackets.CHANNEL_PART)
+async def part_channel(
+    token: str,
+    data_sessions: DataSessions,
+    channel_name: str,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.part_channel(
+        session_token=token,
+        channel_name=channel_name,
+        redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+
+# TODO: ClientPackets.RECEIVE_UPDATES

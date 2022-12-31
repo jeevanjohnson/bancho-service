@@ -39,6 +39,22 @@ class ChannelRepo:
     def __init__(self, redis_connection: FakeStrictRedis) -> None:
         self.redis_connection = redis_connection
 
+    def update(self, name: str, updated_channel: Channel) -> Channel:
+        channel_model = ChannelModel(
+            name=updated_channel["name"],
+            description=updated_channel["description"],
+            auto_join=updated_channel["auto_join"],
+            sessions_in=json.dumps(updated_channel["sessions_in"]),
+            privileges=int(updated_channel["privileges"]),
+        )
+
+        self.redis_connection.set(
+            f"bancho:channels:{name}",
+            json.dumps(channel_model),
+        )
+
+        return updated_channel
+
     def fetch_many(
         self,
         name: Optional[str] = None,
@@ -79,7 +95,6 @@ class ChannelRepo:
         auto_join: bool,
         privileges: ServerPrivileges,
     ) -> Channel:
-        key = f"bancho:channels:{name}"
 
         channel = Channel(
             name=name,
@@ -97,6 +112,9 @@ class ChannelRepo:
             sessions_in=json.dumps(channel["sessions_in"]),
         )
 
-        self.redis_connection.set(key, json.dumps(channel_model))
+        self.redis_connection.set(
+            f"bancho:channels:{name}",
+            json.dumps(channel_model),
+        )
 
         return channel

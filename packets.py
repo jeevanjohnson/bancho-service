@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, Optional, Sequence, TypedDict, Union
 
 import config
 import functions.time
-import objects.matches
 import utils
 from enums.actions import ActionType
 from enums.game_mode import GameMode
@@ -14,10 +13,7 @@ from enums.multiplayer import SlotStatus
 from enums.presence import PresenceFilter
 from enums.privileges import ClientPrivileges
 from repositories.channels import Channel
-
-if TYPE_CHECKING:
-    import objects.matches
-    from repositories.sessions import Session
+from repositories.sessions import Session
 
 
 @enum.unique
@@ -798,13 +794,13 @@ def match_join_fail() -> bytes:
 
 def match_join_sucess(
     match: "objects.matches.Match",
-    send_pass_word: bool = True,
+    send_password: bool = True,
 ) -> bytes:
     pass_word = b""
 
     # what is this and what is going on
     if match.pass_word:
-        if send_pass_word:
+        if send_password:
             pass_word = write_string(match.pass_word)
         else:
             pass_word = b"\x0b\x00"

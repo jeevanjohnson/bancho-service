@@ -36,6 +36,8 @@ class Session(TypedDict):
     current_game_mode: GameMode
     current_map_id: int
 
+    in_lobby: bool
+
     packet_queue: bytearray
 
 
@@ -56,6 +58,8 @@ class SessionModel(TypedDict):
     current_mods: int
     current_game_mode: int
     current_map_id: int
+
+    in_lobby: bool
 
     packet_queue: JSON
 
@@ -131,6 +135,7 @@ class SessionRepo:
                     current_game_mode=GameMode(session["current_game_mode"]),
                     current_map_id=session["current_map_id"],
                     packet_queue=bytearray(json.loads(session["packet_queue"])),
+                    in_lobby=session["in_lobby"],
                 )
             )
 
@@ -163,6 +168,7 @@ class SessionRepo:
             current_game_mode=updated_session["current_game_mode"],
             current_map_id=updated_session["current_map_id"],
             packet_queue=json.dumps(list(updated_session["packet_queue"])),
+            in_lobby=updated_session["in_lobby"],
         )
 
         self.redis_connection.set(
@@ -214,6 +220,7 @@ class SessionRepo:
                     current_game_mode=GameMode(session["current_game_mode"]),
                     current_map_id=session["current_map_id"],
                     packet_queue=bytearray(json.loads(session["packet_queue"])),
+                    in_lobby=session["in_lobby"],
                 )
             )
 
@@ -284,6 +291,7 @@ class SessionRepo:
             current_game_mode=GameMode(session["current_game_mode"]),
             current_map_id=session["current_map_id"],
             packet_queue=bytearray(json.loads(session["packet_queue"])),
+            in_lobby=session["in_lobby"],
         )
 
     def create(
@@ -311,6 +319,7 @@ class SessionRepo:
             current_game_mode=GameMode.vn_std,
             current_map_id=0,
             utc_offset=utc_offset,
+            in_lobby=False
         )
 
         account_model_as_dict = AcountModelAsDict(
@@ -336,6 +345,7 @@ class SessionRepo:
             current_game_mode=int(session["current_game_mode"]),
             current_map_id=session["current_map_id"],
             utc_offset=session["utc_offset"],
+            in_lobby=session["in_lobby"]
         )
         self.redis_connection.set(
             session_key,

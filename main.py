@@ -11,7 +11,7 @@ from database.models import *
 from enums.privileges import ServerPrivileges
 from repositories.channels import ChannelRepo
 
-# from objects import Bot
+# TODO: move to wsl and use sql & redis services
 
 app = FastAPI(
     title="Bancho Service for coveri.xyz",
@@ -28,7 +28,7 @@ def init_app(app: FastAPI) -> FastAPI:
     @app.on_event("startup")
     async def start_up() -> None:
         common.redis = FakeStrictRedis(version=6)  # TODO: user actual redis
-        
+
         common.database = create_engine(url="sqlite:///database.db", echo=False)
 
         sqlmodel.SQLModel.metadata.create_all(
@@ -43,6 +43,13 @@ def init_app(app: FastAPI) -> FastAPI:
             name="#osu",
             description="main osu! channel",
             auto_join=True,
+            privileges=ServerPrivileges.Normal,
+        )
+
+        account_repo.create(
+            name="#lobby",
+            description="main osu! lobby channel",
+            auto_join=False,
             privileges=ServerPrivileges.Normal,
         )
 
