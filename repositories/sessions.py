@@ -43,6 +43,8 @@ class Session(TypedDict):
 
 class SessionModel(TypedDict):
     # "xModel" is what goes into the database
+    # TODO: should token be here?
+    
     account: AcountModelAsDict
 
     utc_offset: int
@@ -80,37 +82,28 @@ class SessionRepo:
         user_ids: Optional[list[int]] = None,  # TODO: more parameters
         tokens: Optional[list[str]] = None,
     ) -> list[Session]:
-        keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
-        tokens = [key.decode().split(":")[-1] for key in keys]
-
-        valid_tokens: list[str] = []
-        valid_session_models: list[SessionModel] = []
-
-        for token, raw_session in zip(
-            tokens,
-            self.redis_connection.mget(keys),
-        ):
+        key: bytes
+        valid_sessions: dict[str, SessionModel] = {}
+        
+        for key in self.redis_connection.scan_iter("bancho:sessions:*"):
+            token = key.decode().split(":")[-1]
+            
+            raw_session = self.redis_connection.get(key)
             if raw_session is None:
                 continue
-
+            
             session: SessionModel = json.loads(raw_session)
-
-            if token:
-                if token not in tokens:
-                    continue
-            elif user_ids:
-                if session["account"]["id"] not in user_ids:
-                    continue
-
-            valid_tokens.append(token)
-            valid_session_models.append(session)
-
-        token: str
-        session: SessionModel
+            
+            if tokens and token not in tokens:
+                continue
+            elif user_ids and session["account"]["id"] not in user_ids:
+                continue
+            
+            valid_sessions[token] = session
 
         sessions = []
 
-        for token, session in zip(valid_tokens, valid_session_models):
+        for token, session in valid_sessions.items():
             account = Account(
                 id=session["account"]["id"],
                 user_name=session["account"]["user_name"],
@@ -179,23 +172,23 @@ class SessionRepo:
         return updated_session
 
     def fetch_all(self) -> list[Session]:
-        keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
-        tokens: list[str] = [key.decode().split(":")[-1] for key in keys]
-
-        session_models: list[SessionModel] = []
-
-        for raw_session in self.redis_connection.mget(keys):
+        key: bytes
+        valid_sessions: dict[str, SessionModel] = {}
+        
+        for key in self.redis_connection.scan_iter("bancho:sessions:*"):
+            token = key.decode().split(":")[-1]
+            
+            raw_session = self.redis_connection.get(key)
             if raw_session is None:
                 continue
-
-            session_models.append(json.loads(raw_session))
-
-        token: str
-        session: SessionModel
-
+            
+            session: SessionModel = json.loads(raw_session)
+            
+            valid_sessions[token] = session
+        
         sessions = []
 
-        for token, session in zip(tokens, session_models):
+        for token, session in valid_sessions.items():
             account = Account(
                 id=session["account"]["id"],
                 user_name=session["account"]["user_name"],
@@ -231,38 +224,27 @@ class SessionRepo:
         token: Optional[str] = None,  # TODO: support other fetch methods
         user_name: Optional[str] = None,
     ) -> Optional[Session]:
-        # TODO: make this cleaner
+        key: bytes
+        session: SessionModel
+        
         if token:
             raw_session = self.redis_connection.get(f"bancho:sessions:{token}")
             if raw_session is None:
                 return None
 
-            session: SessionModel = json.loads(raw_session)
+            session = json.loads(raw_session)
         else:
-            # TODO: find a better way because scaling from here is not that fun
-            keys: list[bytes] = self.redis_connection.keys("bancho:sessions:*")
-            tokens: list[str] = [key.decode().split(":")[-1] for key in keys]
-
-            if not tokens:
-                return None
-
-            session_models: list[SessionModel] = []
-
-            for raw_session in self.redis_connection.mget(keys):
+            for key in self.redis_connection.scan_iter("bancho:sessions:*"):
+                token_from_key = key.decode().split(":")[-1]
+                
+                raw_session = self.redis_connection.get(key)
                 if raw_session is None:
                     continue
-
-                session_models.append(json.loads(raw_session))
-
-            if not session_models:
-                return None
-
-            session_token: str
-            session: SessionModel
-
-            for session_token, session in zip(tokens, session_models):
+                
+                session: SessionModel = json.loads(raw_session)
+                
                 if session["account"]["user_name"] == user_name:
-                    token = session_token
+                    token = token_from_key
                     break
             else:
                 return None

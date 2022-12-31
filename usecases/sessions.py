@@ -148,7 +148,7 @@ async def developer_login(
     account = account_repo.fetch_one(user_name=user_name)
     session = session_repo.fetch_one(user_name=user_name)
 
-    if session is not None:
+    if session:
         return LoginResult(
             error_message="User is already logged in",
             token=None,

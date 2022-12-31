@@ -84,8 +84,6 @@ async def handle_session(
         redis_session=redis_session,
     )
 
-    # TODO: errors?
-
     return SessionResult(
         response_packets=result["response_packets"],
     )
@@ -149,6 +147,8 @@ def packet_handler(packet_id: ClientPackets) -> Callable:
 # packet_handlers can return either an updated session or nothing
 # each packet handler takes the identifier of the session (token)
 # and the avaliable data sessions
+
+# TODO: errors?
 
 from usecases.sessions import DataSessions
 
