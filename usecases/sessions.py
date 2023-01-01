@@ -12,14 +12,18 @@ import functions.security
 import functions.session
 import functions.time
 import packets
+import usecases.channels
+import usecases.matches
 from enums.actions import ActionType
 from enums.game_mode import GameMode
 from enums.mods import Mods
+from enums.multiplayer import SlotStatus, Team, TeamTypes, WinConditions
 from enums.presence import PresenceFilter
 from enums.privileges import ServerPrivileges
 from packets import Packet
 from repositories.accounts import AccountRepo
 from repositories.channels import Channel, ChannelRepo
+from repositories.matches import Match, MatchRepo
 from repositories.sessions import Session, SessionRepo
 
 USER_ID = int
@@ -387,6 +391,8 @@ def part_lobby(
     return session
 
 
+
+
 def update_session_stats(
     session_token: str,
     redis_session: FakeStrictRedis,
@@ -407,7 +413,6 @@ def logout(
     session_token: str,
     redis_session: FakeStrictRedis,
 ) -> Optional[Session]:
-    channel_repo = ChannelRepo(redis_session)
     session_repo = SessionRepo(redis_session)
 
     session = session_repo.fetch_one(token=session_token)
@@ -418,9 +423,16 @@ def logout(
     if (time.time() - session["last_pinged"]) < 2:
         return session
 
-    for channel in channel_repo.fetch_many(names=session["channels_in"]):
-        channel["sessions_in"].remove(session_token)
-        session["channels_in"].remove(channel["name"])
+    for channel_name in session["channels_in"]:
+        results = usecases.channels.remove_session(
+            sessions_token=session_token,
+            channel_name=channel_name,
+            redis_session=redis_session,
+        )
+
+        assert results["success"]
+
+        session["channels_in"].remove(channel_name)
 
     for other_session in session_repo.fetch_all():
         if other_session["token"] == session_token:
@@ -441,36 +453,33 @@ def join_channel(
     redis_session: FakeStrictRedis,
 ) -> Optional[Session]:
     session_repo = SessionRepo(redis_session)
-    channel_repo = ChannelRepo(redis_session)
+    # channel_repo = ChannelRepo(redis_session)
 
     session = session_repo.fetch_one(token=session_token)
 
     if session is None:
         return None
 
-    channel = channel_repo.fetch_one(name=channel_name)
+    results = usecases.channels.add_session(
+        session_token=session_token,
+        channel_name=channel_name,
+        redis_session=redis_session,
+    )
 
-    if channel is None:
+    if not results["success"]:
         return None
 
-    channel["sessions_in"].append(session_token)
+    updated_channel = results["updated_channel"]
+
+    assert updated_channel
+
     session["channels_in"].append(channel_name)
 
-    channel_packets = packets.channel_info(
-        channel_name=channel["name"],
-        channel_description=channel["description"],
-        channel_player_count=len(channel["sessions_in"]),
+    session["packet_queue"] += packets.join_channel(
+        channel_name=updated_channel["name"],
+        description=updated_channel["description"],
+        player_count=len(updated_channel["sessions_in"]),
     )
-    channel_packets += packets.channel_info_end()
-    channel_packets += packets.channel_join(channel["name"])
-
-    session["packet_queue"] += channel_packets
-
-    channel_repo.update(
-        name=channel["name"],
-        updated_channel=channel,
-    )
-
     return session
 
 
@@ -480,29 +489,42 @@ def part_channel(
     redis_session: FakeStrictRedis,
 ) -> Optional[Session]:
     session_repo = SessionRepo(redis_session)
-    channel_repo = ChannelRepo(redis_session)
 
     session = session_repo.fetch_one(token=session_token)
 
     if session is None:
         return None
 
-    channel = channel_repo.fetch_one(name=channel_name)
+    results = usecases.channels.remove_session(
+        sessions_token=session_token,
+        channel_name=channel_name,
+        redis_session=redis_session,
+    )
 
-    if channel is None:
+    if not results["success"]:
         return None
 
-    channel["sessions_in"].remove(session_token)
+    updated_channel = results["updated_channel"]
+
+    assert updated_channel  # this never happens
+
     session["channels_in"].remove(channel_name)
 
     session["packet_queue"] += packets.channel_kick(
         channel_name=channel_name,
     )
 
-    channel_repo.update(
-        name=channel["name"],
-        updated_channel=channel,
-    )
+    for other_session in session_repo.fetch_many(tokens=updated_channel["sessions_in"]):
+        other_session["packet_queue"] += packets.channel_info(
+            channel_name=updated_channel["name"],
+            channel_description=updated_channel["description"],
+            channel_player_count=len(updated_channel["sessions_in"]),
+        )
+
+        session_repo.update(
+            token=other_session["token"],
+            updated_session=other_session,
+        )
 
     return session
 
@@ -524,6 +546,46 @@ def update_presence_filter(
     return session
 
 
+class SendMessageToResult(TypedDict):
+    success: bool
+
+
+def send_message_to(
+    sender_token: str,
+    message: str,
+    target_user_name: str,  # TODO: support token?
+    redis_session: FakeStrictRedis,
+) -> SendMessageToResult:
+    session_repo = SessionRepo(redis_session)
+
+    sender_session = session_repo.fetch_one(token=sender_token)
+
+    if sender_session is None:
+        return SendMessageToResult(success=False)
+
+    target_session = session_repo.fetch_one(user_name=target_user_name)
+
+    if target_session is None:
+        return SendMessageToResult(success=False)
+
+    # send private message to target
+    target_session["packet_queue"] += packets.send_message(
+        senders_name=sender_session["account"]["user_name"],
+        message=message,
+        target_channel_or_user=target_session["account"]["user_name"],
+        sender_user_id=sender_session["account"]["id"],
+    )
+
+    updated_target_session = session_repo.update(
+        token=target_session["token"],
+        updated_session=target_session,
+    )
+
+    return SendMessageToResult(
+        success=True,
+    )
+
+
 def send_message(
     session_token: str,
     redis_session: FakeStrictRedis,
@@ -532,7 +594,6 @@ def send_message(
 ) -> Optional[Session]:
     # handles channel messages and private messages
     session_repo = SessionRepo(redis_session)
-    channel_repo = ChannelRepo(redis_session)
 
     session = session_repo.fetch_one(token=session_token)
 
@@ -541,40 +602,143 @@ def send_message(
 
     if target.startswith("#"):
         # send message to everyone in channel
-        channel = channel_repo.fetch_one(name=target)
-        assert channel, "TODO: handle this properly"
-
-        session_tokens_in = channel["sessions_in"]
-
-        # remove sender's session token so message won't be sent twice
-        session_tokens_in.remove(session_token)
-
-        for other_session in session_repo.fetch_many(tokens=session_tokens_in):
-            other_session["packet_queue"] += packets.send_message(
-                senders_name=session["account"]["user_name"],
-                message=message_content,
-                target_channel_or_user=target,
-                sender_user_id=session["account"]["id"],
-            )
-
-            session_repo.update(
-                token=other_session["token"],
-                updated_session=other_session,
-            )
-    else:
-        target_session = session_repo.fetch_one(user_name=target)
-        assert target_session, "TODO: handle this properly"
-        # send private message to target
-        target_session["packet_queue"] += packets.send_message(
-            senders_name=session["account"]["user_name"],
+        results = usecases.channels.send_message(
+            sender_token=session_token,
             message=message_content,
-            target_channel_or_user=target,
-            sender_user_id=session["account"]["id"],
+            channel_name=target,
+            redis_session=redis_session,
+            excluded_session_tokens=[session_token],
         )
 
-        session_repo.update(
-            token=target_session["token"],
-            updated_session=target_session,
+        if not results["success"]:
+            session["packet_queue"] += packets.notification(
+                message=f"couldn't send message to {target}"
+            )
+
+    else:
+        results = send_message_to(
+            sender_token=session_token,
+            target_user_name=target,
+            message=message_content,
+            redis_session=redis_session,
         )
+
+        if not results["success"]:
+            session["packet_queue"] += packets.notification(
+                message="this user is not online.",
+            )
 
     return session
+
+def create_match(
+    session_token: str,
+    match: packets.Match,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    session_repo = SessionRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    result = usecases.matches.generate_match_id(
+        redis_session=redis_session,
+    )
+
+    if result["match_id"] > 64:
+        session["packet_queue"] += packets.notification(
+            message="No slots available for this match."
+        )
+        session["packet_queue"] += packets.match_join_fail()
+        return session
+
+    match_id = result["match_id"]
+
+    results = usecases.matches.create(
+        creator_token=session["token"],
+        match_id=match_id,
+        host_id=match.host_id,
+        game_mode=GameMode(match.game_mode),
+        mods=Mods(match.mods),
+        match_name=match.name,
+        win_condition=WinConditions(match.win_condition),
+        team_type=TeamTypes(match.team_type),
+        current_map_name=match.map_name,
+        current_map_id=match.map_id,
+        current_map_md5=match.map_md5,
+        seed=match.seed,
+        redis_session=redis_session,
+    )
+
+    if not results["success"]:
+        session["packet_queue"] += packets.notification(
+            message="error when creating match..."
+        )
+        session["packet_queue"] += packets.match_join_fail()
+        return session
+
+    return results["updated_host_session"]
+
+def change_match_settings(
+    session_token: str,
+    new_match: packets.Match,
+    redis_session: FakeStrictRedis,
+) -> Optional[Session]:
+    match_repo = MatchRepo(redis_session)
+    session_repo = SessionRepo(redis_session)
+
+    session = session_repo.fetch_one(token=session_token)
+
+    if session is None:
+        return None
+
+    match = match_repo.fetch_one(match_id=session["match"])
+
+    if match is None:
+        return None
+
+    if session["account"]["id"] != match["host_id"]:
+        session["packet_queue"] += packets.notification(message="you are not the host!")
+        return session
+
+    taken_slots = [
+        slot for slot in match["slots"] if slot["status"] & SlotStatus.HAS_PLAYER
+    ]
+
+    if match["free_mod"] != new_match.freemods:
+        match["free_mod"] = new_match.freemods
+
+        if new_match.freemods:
+            # match mods -> active slot mods.
+            # TODO: understand this
+            for slot in taken_slots:
+                slot["mods"] = match["mods"] & ~Mods.SPEED_CHANGING
+
+            match["mods"] &= Mods.SPEED_CHANGING
+        else:
+            # host mods -> match mods
+            host_slot = [
+                slot for slot in match["slots"] if slot["user_id"] == match["host_id"]
+            ][0]
+
+            match["mods"] &= Mods.SPEED_CHANGING
+            match["mods"] |= host_slot["mods"]
+
+            for slot in taken_slots:
+                slot["mods"] = Mods.NOMOD
+
+    if new_match.map_id == -1:
+        # map is being changed
+        for slot in taken_slots:
+            if slot["status"] == SlotStatus.READY:
+                slot["status"] = SlotStatus.NOT_READY
+
+        match["previous_map_id"] = match["current_map_id"]
+
+        match["current_map_id"] = -1
+        match["current_map_md5"] = ""
+        match["current_map_name"] = ""
+    elif match["current_map_id"] == -1:
+        if match["previous_map_id"] != new_match.map_id:
+            ...

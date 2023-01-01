@@ -13,6 +13,7 @@ import usecases.sessions
 from enums.presence import PresenceFilter
 from packets import ClientPackets
 from repositories.sessions import Session
+from usecases.sessions import DataSessions
 
 bancho_router = APIRouter(tags=["Bancho", "Router"])
 
@@ -150,8 +151,6 @@ def packet_handler(packet_id: ClientPackets) -> Callable:
 # and the avaliable data sessions
 
 # TODO: errors?
-
-from usecases.sessions import DataSessions
 
 
 @packet_handler(ClientPackets.PING)
@@ -351,6 +350,42 @@ async def logout(
     updated_session = usecases.sessions.logout(
         session_token=token,
         redis_session=data_sessions["redis_session"],
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+
+@packet_handler(ClientPackets.CREATE_MATCH)
+async def create_match(
+    token: str,
+    data_sessions: DataSessions,
+    match: packets.Match,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.create_match(
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+        match=match,
+    )
+
+    if updated_session is None:
+        return None
+
+    return updated_session
+
+
+@packet_handler(ClientPackets.MATCH_CHANGE_SETTINGS)
+async def match_change_settings(
+    token: str,
+    data_sessions: DataSessions,
+    new_match: packets.Match,
+) -> Optional[Session]:
+    updated_session = usecases.sessions.change_match_settings(
+        session_token=token,
+        redis_session=data_sessions["redis_session"],
+        new_match=new_match,
     )
 
     if updated_session is None:

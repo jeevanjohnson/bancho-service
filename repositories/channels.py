@@ -89,9 +89,6 @@ class ChannelRepo:
     def fetch_one(
         self,
         name: Optional[str] = None,
-        description: Optional[str] = None,  # TODO: do I need to use these?
-        auto_join: Optional[bool] = None,  # TODO: do I need to use these?
-        privileges: Optional[ServerPrivileges] = None,  # TODO: do I need to use these?
     ) -> Optional[Channel]:
         if name is None:
             return None  # TODO: for now

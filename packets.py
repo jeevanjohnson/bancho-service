@@ -13,6 +13,7 @@ from enums.multiplayer import SlotStatus
 from enums.presence import PresenceFilter
 from enums.privileges import ClientPrivileges
 from repositories.channels import Channel
+from repositories.matches import Match as MatchType
 from repositories.sessions import Session
 
 
@@ -705,6 +706,20 @@ def user_silenced(userid: int) -> bytes:
 
 
 # live server functionality
+def join_channel(
+    channel_name: str,
+    description: str,
+    player_count: int,
+) -> bytes:
+    channel_packets = channel_info(
+        channel_name=channel_name,
+        channel_description=description,
+        channel_player_count=player_count,
+    )
+    channel_packets += channel_info_end()
+    channel_packets += channel_join(channel_name)
+
+    return channel_packets
 
 
 def pack_osu_session_stats(session: "Session") -> bytes:
@@ -793,47 +808,47 @@ def match_join_fail() -> bytes:
 
 
 def match_join_sucess(
-    match: "objects.matches.Match",
+    match: MatchType,
     send_password: bool = True,
 ) -> bytes:
     pass_word = b""
 
     # what is this and what is going on
-    if match.pass_word:
+    if match["password"]:  # TODO: is not None?
         if send_password:
-            pass_word = write_string(match.pass_word)
+            pass_word = write_string(match["password"])
         else:
             pass_word = b"\x0b\x00"
     else:
         pass_word = b"\x00"
 
-    free_mod = write_byte(match.free_mod)
-    if match.free_mod:
-        for slot in match.slots:
-            free_mod += write_unsigned_int(slot.mods)
+    free_mod = write_byte(match["free_mod"])
+    if match["free_mod"]:
+        for slot in match["slots"]:
+            free_mod += write_unsigned_int(slot["mods"])
 
     return write_packet(
         ServerPackets.MATCH_JOIN_SUCCESS,
-        write_unsigned_short(match.id),
-        write_byte(match.in_progress),
+        write_unsigned_short(match["match_id"]),
+        write_byte(match["in_progress"]),
         write_byte(0),
-        write_unsigned_int(match.mods),
-        write_string(match.name),
+        write_unsigned_int(match["mods"]),
+        write_string(match["match_name"]),
         pass_word,
-        write_string(match.name),
-        write_int(match.current_map.id),
-        write_string(match.current_map.md5),
-        *[write_byte(slot.status) for slot in match.slots],
-        *[write_byte(slot.team) for slot in match.slots],
+        write_string(match["match_name"]),
+        write_int(match["current_map_id"]),
+        write_string(match["current_map_md5"]),
+        *[write_byte(slot["status"]) for slot in match["slots"]],
+        *[write_byte(slot["team"]) for slot in match["slots"]],
         *[
-            write_unsigned_int(slot.user_id)
-            for slot in match.slots
-            if slot.status & SlotStatus.HAS_PLAYER and slot.user_id
+            write_unsigned_int(slot["user_id"])
+            for slot in match["slots"]
+            if slot["status"] & SlotStatus.HAS_PLAYER and slot["user_id"]
         ],
-        write_unsigned_int(match.host_id),
-        write_byte(match.game_mode),
-        write_byte(match.win_condition),
-        write_byte(match.team_type),
+        write_unsigned_int(match["host_id"]),
+        write_byte(match["game_mode"]),
+        write_byte(match["win_condition"]),
+        write_byte(match["team_type"]),
         free_mod,
-        write_byte(match.seed),
+        write_int(match["seed"]),
     )
